@@ -1,0 +1,32 @@
+---
+description: Smart Helmet architecture — phone chooses the cue, helmet only plays it
+alwaysApply: true
+---
+
+# Smart Helmet
+
+The phone navigates. The ESP32-S3 helmet vibrates. One `Cue` drives both the map and the motors.
+
+- Choose left, front, right, or u-turn only in the cue engine: `shared/nav/engine.py`, ported in `mobile/src/engine.ts`. `ScreenState`, `HelmetLink`, and firmware copy `Cue.direction`. They do not recompute it.
+- BLE is an 8-byte cue to the helmet and a 4-byte helmet state back. Do not send a route or a GPS stream. The peripheral name is `SmartHelmet`. Layout: `shared/cue-protocol.md`. Byte contract: `shared/protocol/test_codec.py`.
+- Heading is GPS course at 2 m/s or faster, otherwise the helmet IMU. Invalid heading is `0xFFFF`. Do not use the phone compass.
+- Profile is cycling. Straight segments stay quiet. A cue older than 2 seconds stops the motors.
+- Keep the three copies aligned: Python `shared/`, TypeScript `mobile/src/`, C `firmware/`. Change a decision in Python, port the same behavior, then run the tests below. Do not add a second algorithm in the view or on the ESP32.
+- `PLAN.md` still describes `mobile/src/nav/` and OpenRouteService as the live fallback. The phone uses `mobile/src/*.ts` and OpenStreetMap bike routing. `mobile/AGENTS.md` assumes Expo Router. Trust the code and `shared/cue-protocol.md`.
+
+```typescript
+// Wrong: the screen picks a motor
+motors.left = maneuver.modifier === "left";
+
+// Right: the screen lights the motor the engine already chose
+motors.left = decision.cue.direction === DIRECTION_LEFT;
+```
+
+After a protocol, engine, routing, or screen change:
+
+```bash
+python3 -m unittest discover -s shared -v
+cd mobile && npm test
+```
+
+Firmware packet or actuator changes also need the host check in `PLAN.md` (`firmware/host/test_helmet.c`). Do not flash until that check passes.

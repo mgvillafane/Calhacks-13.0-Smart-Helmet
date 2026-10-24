@@ -1,0 +1,15 @@
+---
+description: ESP32-S3 helmet firmware that plays cues and reports heading
+globs: firmware/**/*.{c,cpp,h}
+alwaysApply: false
+---
+
+# Helmet firmware
+
+PlatformIO Arduino on `esp32-s3-devkitc-1`. The board is a BLE peripheral named `SmartHelmet`. It does not route, read GPS, or choose a direction.
+
+- Protocol code is C in `firmware/src/protocol.c` with the API in `firmware/include/protocol.h`. Return `0` on success and `-1` on reject. Match `shared/protocol/test_codec.py` byte for byte, little-endian.
+- GPIO numbers live only in `firmware/include/pins.h`: motors 17 left, 18 front, 21 right; LEDs 10 and 11; buttons 8 MODE and 9 SOS, active low. Do not treat GPIO numbers as header positions.
+- `actuator_frame` plays the cue. Left, front, and right each pulse one motor. U-turn alternates left and right. LEDs mirror left and right only. A cue older than 2 seconds, or a dropped link, stops the motors.
+- Heading notify is about 5 Hz. Until the IMU read exists, send the invalid sentinel. A failed magnetometer still lets the motors play the cue.
+- `main.cpp` is the Arduino and BLE shell. Keep packet, actuator, and heading logic in the C files so `firmware/host/test_helmet.c` can compile them on the host. Run that clang check from `PLAN.md` before flashing with `pio run -t upload`.

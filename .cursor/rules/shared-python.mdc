@@ -1,0 +1,15 @@
+---
+description: Python reference for the cue protocol, engine, routing, and screen
+globs: shared/**/*.py
+alwaysApply: false
+---
+
+# Shared Python
+
+`shared/` is the reference the phone and the firmware copy. Run tests from the repo root: `python3 -m unittest shared.nav.test_engine -v` (same pattern for `protocol`, `routing`, `ui`, `ble`, `docs`).
+
+- Packets live in `shared/protocol/codec.py`. Frozen dataclasses, little-endian, reject unknown versions, directions, and flag bits. A valid heading is 0–3599 decidegrees; invalid is `0xFFFF` with `heading_valid` false.
+- `CueEngine` in `shared/nav/engine.py` is the only place that picks a direction. Thresholds already there: 30 m and 3 fixes off route, lookahead `clamp(speed * 5s, 25m, 80m)`, provider trust 45°, front bucket 30°, u-turn past 150°, pulse 800 ms down to 200 ms, intensity 160.
+- Routing parsers in `shared/routing/providers.py` only build a `Route`. Mapbox when a token is present, otherwise OpenRouteService. Inject HTTP; do not call the network from tests.
+- `ScreenState` copies the decision onto motors, the puck heading, and the banner. `HelmetLink` scans for the exact name `SmartHelmet`, writes the encoded cue, and converts heading notifies to degrees.
+- Match existing style: frozen dataclasses, module constants, `unittest`, no new frameworks. After a behavior change, port it to `mobile/src/` and `firmware/` in the same task.

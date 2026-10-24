@@ -1,0 +1,16 @@
+---
+description: Expo phone app that ports the Python cue engine and talks BLE
+globs: mobile/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Phone app
+
+Expo SDK 58, React 19, React Native 0.88, TypeScript `strict`. One screen in `mobile/App.tsx`. Do not add Expo Router or `src/app/`. Logic stays in `mobile/src/` and is covered by `npm test` (`tsx --test src/phone.test.ts`).
+
+- Port behavior from `shared/`. Field names are camelCase (`pulsePeriodMs`, `distanceM`). Packet layout and numeric thresholds must match the Python codec and `CueEngine`.
+- `routeBetween` uses Mapbox cycling directions when a token is passed, otherwise the OpenStreetMap bike router. Search uses Nominatim. Do not put tokens, keys, or a User-Agent change into git. Keep `ROUTING_USER_AGENT`.
+- The map is `StreetMap` plus `tiles.ts` (OSM tiles in a WebView). UI reads `ScreenState`; it does not choose a turn.
+- BLE goes through `HelmetLink` and a `Radio`. Production radio is `react-native-ble-plx` in `radio.ts`. Tests inject a fake radio. Connect only when the advertised name is exactly `SmartHelmet`.
+- Expo Go cannot run this app. Add native modules with `npx expo install`. Before using an Expo API, read the SDK 58 page under https://docs.expo.dev/versions/v58.0.0/. Native config belongs in `app.json` plugins, not hand-written `ios/` or `android/` projects.
+- Check `npx tsc --noEmit` and `npm test` from `mobile/` before finishing.
