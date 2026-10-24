@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Dimensions, Keyboard, KeyboardEvent, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { initialWindowMetrics, SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import { demoLeftTurn } from "./src/demo";
 import { CueEngine, Fix, Route, fixAlong } from "./src/engine";
@@ -13,6 +14,14 @@ import { StreetMap } from "./src/StreetMap";
 const DEMO_SPEED_MPS = 8;
 
 export default function App() {
+  return (
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+      <HelmetScreen />
+    </SafeAreaProvider>
+  );
+}
+
+function HelmetScreen() {
   const engineRef = useRef(new CueEngine(demoLeftTurn(37.8703, -122.2595)));
   const sessionRef = useRef(new NavSession());
   const linkRef = useRef<HelmetLink | null>(null);
@@ -276,9 +285,11 @@ export default function App() {
   }
 
   const typing = keyboardHeight > 0 || choices.length > 0 || searching;
+  const insets = useSafeAreaInsets();
+  const bottomInset = keyboardHeight > 0 ? keyboardHeight : Math.max(insets.bottom, 28);
 
   return (
-    <View style={[styles.page, { paddingBottom: 16 + keyboardHeight }]}>
+    <View style={[styles.page, { paddingBottom: 16 + bottomInset }]}>
       <Text style={styles.title}>{screen.instruction || "Smart Helmet"}</Text>
       {typing ? null : (
         <Text style={styles.meta}>
