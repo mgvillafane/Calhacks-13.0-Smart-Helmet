@@ -42,6 +42,12 @@
         {
           "locationWhenInUsePermission": "Smart Helmet uses your location to choose the next turn."
         }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Smart Helmet uses the microphone for voice commands."
+        }
       ]
     ]
   }

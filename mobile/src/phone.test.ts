@@ -9,6 +9,20 @@ import { advertisementFromScan, HelmetLink } from "./link";
 import { helmetScanPermissions } from "./scanPermissions";
 import { DIRECTION_LEFT, encodeCue, SERVICE_UUID } from "./protocol";
 import { NavSession } from "./screen";
+import { VoiceAgent } from "./voiceAgent";
+import {
+  VOICE_TOOL_NAMES,
+  base64ToBytes,
+  bytesToBase64,
+  commandFromCall,
+  pcmDurationMs,
+  prepareMicPcm,
+  voiceConnectOptions,
+  voiceKeyConfigured,
+  voiceSessionUpdate,
+  wavFromPcm16,
+  whatsNextResult,
+} from "./voice";
 
 describe("phone navigator", () => {
   it("encodes a left cue the helmet can play", () => {
@@ -122,4 +136,86 @@ describe("phone navigator", () => {
     assert.ok(plan.tiles.length > 0 && plan.tiles.length <= 16);
     assert.ok(Math.abs(mercatorTile(0, 0, 0)[0] - 0.5) < 1e-9);
   });
+
+  it("asks Grok Voice for route commands and leaves the turn to the cue engine", async () => {
+    assert.equal(voiceKeyConfigured("  "), false);
+    assert.equal(voiceKeyConfigured("xai-test"), true);
+    assert.deepEqual(voiceConnectOptions("xai-test").headers, { Authorization: "Bearer xai-test" });
+    assert.deepEqual(voiceConnectOptions("xai-client-secret.abc").protocols, ["xai-client-secret.abc"]);
+    const session = voiceSessionUpdate().session as { instructions: string; tools: { name: string }[] };
+    assert.match(session.instructions, /cue engine already chose the turn/i);
+    assert.deepEqual(session.tools.map((item) => item.name), [...VOICE_TOOL_NAMES]);
+    assert.equal(commandFromCall("set_direction", "{\"direction\":\"left\"}"), null);
+    assert.deepEqual(commandFromCall("navigate_to", "{\"query\":\"Sather Gate\"}"), { name: "navigate_to", query: "Sather Gate" });
+    assert.equal(whatsNextResult({ phase: "navigating", destinationName: "Sather Gate", instruction: "Turn left", metersToJunction: 40 }), JSON.stringify({
+      phase: "navigating",
+      destination: "Sather Gate",
+      instruction: "Turn left",
+      meters: 40,
+      say: "Turn left. 40 meters.",
+    }));
+
+    const pcm = pcm16([1, -2]);
+    assert.deepEqual([...base64ToBytes(bytesToBase64(pcm))], [...pcm]);
+    assert.deepEqual([...prepareMicPcm(pcm16([2, 4, 6, 8]), 2, 8000)], [...pcm16([3, 3, 7, 7])]);
+    const wav = wavFromPcm16(pcm, 16000);
+    assert.equal(String.fromCharCode(...wav.slice(0, 4)), "RIFF");
+    assert.equal(wav[24], 0x80);
+    assert.equal(wav[25], 0x3e);
+    assert.equal(pcmDurationMs(pcm.length), 1);
+
+    const sent: string[] = [];
+    const executed: string[] = [];
+    const played: Uint8Array[] = [];
+    const agent = new VoiceAgent(
+      { send: (data) => sent.push(data), close() {} },
+      async (command) => {
+        executed.push(command.name);
+        return JSON.stringify({ status: "riding", place: "Sather Gate" });
+      },
+      async (clip) => {
+        played.push(clip);
+      },
+    );
+    agent.start();
+    agent.sendPcm(pcm);
+    agent.finishUtterance();
+    assert.match(sent[0], /navigate_to/);
+    assert.match(sent[1], /input_audio_buffer.append/);
+    assert.match(sent[2], /input_audio_buffer.commit/);
+    assert.match(sent[3], /response.create/);
+
+    const heard = await agent.handleMessage(JSON.stringify({
+      type: "conversation.item.input_audio_transcription.updated",
+      transcript: "take me to Sather Gate",
+    }));
+    assert.equal(heard?.text, "take me to Sather Gate");
+    await agent.handleMessage(JSON.stringify({ type: "response.created" }));
+    await agent.handleMessage(JSON.stringify({ type: "response.output_audio.delta", delta: bytesToBase64(pcm) }));
+    await agent.handleMessage(JSON.stringify({
+      type: "response.function_call_arguments.done",
+      name: "navigate_to",
+      call_id: "call-1",
+      arguments: "{\"query\":\"Sather Gate\"}",
+    }));
+    await agent.handleMessage(JSON.stringify({
+      type: "response.function_call_arguments.done",
+      name: "set_direction",
+      call_id: "call-2",
+      arguments: "{\"direction\":\"left\"}",
+    }));
+    await agent.handleMessage(JSON.stringify({ type: "response.done" }));
+    assert.deepEqual(executed, ["navigate_to"]);
+    assert.equal(String.fromCharCode(...played[0].slice(0, 4)), "RIFF");
+    const outputs = sent.slice(4).map((line) => JSON.parse(line) as { type: string; item?: { call_id?: string; output?: string } });
+    assert.equal(outputs.filter((line) => line.type === "response.create").length, 1);
+    assert.match(outputs.find((line) => line.item?.call_id === "call-2")?.item?.output ?? "", /cue engine chooses the turn/);
+  });
 });
+
+function pcm16(values: number[]): Uint8Array {
+  const out = new Uint8Array(values.length * 2);
+  const view = new DataView(out.buffer);
+  values.forEach((value, index) => view.setInt16(index * 2, value, true));
+  return out;
+}

@@ -12,12 +12,12 @@ const MAP_HTML = `<!DOCTYPE html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <style>
-    html, body, #map { margin: 0; height: 100%; width: 100%; background: #d5dde8; overflow: hidden; touch-action: none; }
+    html, body, #map { margin: 0; height: 100%; width: 100%; background: #1a1c22; overflow: hidden; touch-action: none; }
     #tiles { position: absolute; inset: 0; }
-    #tiles img { position: absolute; width: 256px; height: 256px; }
+    #tiles img { position: absolute; width: 256px; height: 256px; filter: grayscale(0.35) brightness(0.38) contrast(1.2); }
     #draw { position: absolute; inset: 0; width: 100%; height: 100%; }
-    #credit { position: absolute; right: 6px; bottom: 4px; background: rgba(255,255,255,.85); color: #222; font: 11px sans-serif; padding: 1px 4px; }
-    #status { position: absolute; left: 8px; top: 8px; color: #163a8a; font: 13px sans-serif; }
+    #credit { position: absolute; right: 6px; bottom: 4px; background: rgba(20,22,26,.72); color: #8B929C; font: 11px sans-serif; padding: 1px 4px; }
+    #status { position: absolute; left: 8px; top: 8px; color: #8B929C; font: 13px sans-serif; }
   </style>
 </head>
 <body>
@@ -31,7 +31,7 @@ const MAP_HTML = `<!DOCTYPE html>
     var TILE = 256;
     var zoom = 16;
     var center = { lat: 37.8703, lng: -122.2595 };
-    var ride = { traveled: [], remaining: [], puck: null, decision: null, follow: false, routeKey: "", heading: null, vehicle: "bicycle" };
+    var ride = { traveled: [], remaining: [], puck: null, decision: null, follow: false, routeKey: "", heading: null, vehicle: "bicycle", user: null };
     var seenRoute = "";
     var userMoved = false;
     var tilesLoaded = 0;
@@ -130,10 +130,10 @@ const MAP_HTML = `<!DOCTYPE html>
       ctx.bezierCurveTo(-14, 2, -11, -16, 0, -16);
       ctx.bezierCurveTo(11, -16, 14, 2, 0, 12);
       ctx.closePath();
-      ctx.fillStyle = "#d23b3b";
+      ctx.fillStyle = "#FFC400";
       ctx.fill();
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = "#7d1515";
+      ctx.strokeStyle = "#14161A";
       ctx.stroke();
       ctx.beginPath();
       ctx.arc(0, -6, 3.2, 0, Math.PI * 2);
@@ -184,16 +184,36 @@ const MAP_HTML = `<!DOCTYPE html>
       ctx.lineTo(24, -12);
       ctx.stroke();
     }
+    function drawUser(point) {
+      if (!point) return;
+      var xy = screenPoint(point[0], point[1]);
+      ctx.beginPath();
+      ctx.arc(xy[0], xy[1], 14, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(242,242,240,0.28)";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(xy[0], xy[1], 5, 0, Math.PI * 2);
+      ctx.fillStyle = "#F2F2F0";
+      ctx.fill();
+    }
     function drawRider(point, heading, kind) {
       if (!point) return;
       var xy = screenPoint(point[0], point[1]);
       ctx.save();
       ctx.translate(xy[0], xy[1]);
+      ctx.beginPath();
+      ctx.arc(0, 0, 16, 0, Math.PI * 2);
+      ctx.fillStyle = "#F2F2F0";
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#3DA5FF";
+      ctx.stroke();
       ctx.rotate(((heading == null ? 90 : heading) - 90) * Math.PI / 180);
-      ctx.lineWidth = 2.4;
+      ctx.scale(0.55, 0.55);
+      ctx.lineWidth = 2.6;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.strokeStyle = "#142033";
+      ctx.strokeStyle = "#1E1245";
       if (kind === "scooter") drawScooterGlyph();
       else drawBicycleGlyph();
       ctx.restore();
@@ -208,11 +228,12 @@ const MAP_HTML = `<!DOCTYPE html>
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       renderTiles();
       ctx.clearRect(0, 0, box.w, box.h);
-      stroke(ride.traveled, "#8b93a7", 5);
-      stroke(ride.remaining, "#2f6fed", 6);
+      stroke(ride.traveled, "#4A4E54", 5);
+      stroke(ride.remaining, "#3DA5FF", 6);
       var end = ride.remaining && ride.remaining.length ? ride.remaining[ride.remaining.length - 1] : null;
       drawPin(ride.decision || end);
-      drawRider(ride.puck, ride.heading, ride.vehicle);
+      if (ride.puck) drawRider(ride.puck, ride.heading, ride.vehicle);
+      else drawUser(ride.user);
     }
     function fit(points) {
       var box = size();
@@ -244,6 +265,9 @@ const MAP_HTML = `<!DOCTYPE html>
       if (ride.follow && ride.puck && !userMoved) {
         center = { lat: ride.puck[0], lng: ride.puck[1] };
         if (changed) zoom = 16;
+      } else if (!points.length && ride.user && !userMoved) {
+        center = { lat: ride.user[0], lng: ride.user[1] };
+        zoom = 16;
       } else if (changed) {
         fit(points);
       }
@@ -302,12 +326,12 @@ const MAP_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
-export function StreetMap({ screen, vehicle }: { screen: ScreenState; vehicle: VehicleKind }) {
+export function StreetMap({ screen, vehicle, user }: { screen: ScreenState; vehicle: VehicleKind; user: [number, number] | null }) {
   const webRef = useRef<WebView>(null);
-  const latest = useRef({ screen, vehicle });
-  latest.current = { screen, vehicle };
+  const latest = useRef({ screen, vehicle, user });
+  latest.current = { screen, vehicle, user };
 
-  function push(next: ScreenState, kind: VehicleKind): void {
+  function push(next: ScreenState, kind: VehicleKind, point: [number, number] | null): void {
     const payload = {
       traveled: next.traveled,
       remaining: next.remaining,
@@ -315,6 +339,7 @@ export function StreetMap({ screen, vehicle }: { screen: ScreenState; vehicle: V
       decision: next.decisionMarker,
       heading: next.puckHeadingDeg,
       vehicle: kind,
+      user: point,
       follow: next.phase === "navigating" && next.puck != null,
       routeKey: next.destinationName,
     };
@@ -322,8 +347,8 @@ export function StreetMap({ screen, vehicle }: { screen: ScreenState; vehicle: V
   }
 
   useEffect(() => {
-    push(screen, vehicle);
-  }, [screen, vehicle]);
+    push(screen, vehicle, user);
+  }, [screen, vehicle, user]);
 
   return (
     <MapWeb
@@ -336,11 +361,11 @@ export function StreetMap({ screen, vehicle }: { screen: ScreenState; vehicle: V
       scrollEnabled={false}
       setSupportMultipleWindows={false}
       applicationNameForUserAgent="SmartHelmet/1.0"
-      onLoadEnd={() => push(latest.current.screen, latest.current.vehicle)}
+      onLoadEnd={() => push(latest.current.screen, latest.current.vehicle, latest.current.user)}
     />
   );
 }
 
 const styles = StyleSheet.create({
-  map: { flex: 1, backgroundColor: "#d5dde8" },
+  map: { flex: 1, backgroundColor: "#1a1c22" },
 });
