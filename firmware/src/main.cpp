@@ -269,6 +269,8 @@ class CueCallbacks : public BLECharacteristicCallbacks {
 
 void setup(void) {
     Serial.begin(115200);
+    // With USB plugged in and no reader, a blocking print stalls the loop and the blinker UART.
+    Serial.setTxTimeoutMs(0);
     Serial1.begin(115200, SERIAL_8N1, PIN_BLINKER_RX, PIN_BLINKER_TX);
 
     pinMode(PIN_BUTTON_MODE, INPUT_PULLUP);

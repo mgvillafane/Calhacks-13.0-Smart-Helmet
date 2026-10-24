@@ -5,6 +5,9 @@
 // Share ground. Letters at 115200: L left, R right, U u-turn, O turn off.
 // B holds the brake strip on and b releases it. A turn can stay lit while braking.
 // Any letter older than the timeout turns every strip off.
+// At power-up the strips flash left, right, then brake once.
+// The on-board LED (pin 13) stays lit while letters keep arriving.
+// Every received byte is echoed on TX so a laptop on USB can watch the link.
 
 #define LEFT_PIN  6
 #define RIGHT_PIN 7
@@ -35,10 +38,16 @@ void showCommand(char active, bool on, bool brake) {
   setColor(leftStrip, 0, 0, 0);
   setColor(rightStrip, 0, 0, 0);
   setColor(brakeStrip, 0, 0, 0);
-  if ((active == 'L' || active == 'U') && on) {
+  if (active == 'L' && on) {
     setColor(leftStrip, 255, 150, 0);
   } else if (active == 'R' && on) {
     setColor(rightStrip, 255, 150, 0);
+  } else if (active == 'U') {
+    if (on) {
+      setColor(leftStrip, 255, 150, 0);
+    } else {
+      setColor(rightStrip, 255, 150, 0);
+    }
   }
   if (brake) {
     setColor(brakeStrip, 255, 0, 0);
@@ -56,12 +65,25 @@ void setup() {
   rightStrip.setBrightness(80);
   brakeStrip.setBrightness(80);
 
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
+
+  showCommand('L', true, false);
+  delay(400);
+  showCommand('R', true, false);
+  delay(400);
+  showCommand('O', false, true);
+  delay(400);
   showCommand('O', false, false);
+  while (Serial.available() > 0) {
+    Serial.read();
+  }
 }
 
 void loop() {
   while (Serial.available() > 0) {
     char next = (char)Serial.read();
+    Serial.write(next);
     if (next == '\n' || next == '\r') {
       continue;
     }
@@ -78,7 +100,9 @@ void loop() {
     }
   }
 
-  if (millis() - commandMs > COMMAND_TIMEOUT_MS) {
+  bool linked = commandMs != 0 && millis() - commandMs <= COMMAND_TIMEOUT_MS;
+  digitalWrite(LED_BUILTIN, linked ? HIGH : LOW);
+  if (!linked) {
     turn = 'O';
     brakeOn = false;
   }
