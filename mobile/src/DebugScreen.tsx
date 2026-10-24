@@ -2,7 +2,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { ChevronLeftIcon, MUTED, SURFACE, YELLOW } from "./icons";
 import { GpsReading, gpsStatus } from "./gps";
 import { SensorSample } from "./protocol";
-import { micLevel } from "./debug";
+import { DebugSide, micLevel } from "./debug";
 
 const BG = "#14161A";
 const TEXT = "#F2F2F0";
@@ -17,6 +17,7 @@ export function DebugScreen({
   onBack,
   onConnect,
   onLeft,
+  onFront,
   onRight,
   onStop,
 }: {
@@ -25,10 +26,11 @@ export function DebugScreen({
   bleMessage: string;
   connected: boolean;
   sensors: SensorSample | null;
-  holding: "left" | "right" | null;
+  holding: DebugSide | null;
   onBack: () => void;
   onConnect: () => void;
   onLeft: () => void;
+  onFront: () => void;
   onRight: () => void;
   onStop: () => void;
 }) {
@@ -51,6 +53,9 @@ export function DebugScreen({
       <View style={styles.row}>
         <Pressable style={[styles.pill, holding === "left" ? styles.pillOn : null]} onPress={onLeft}>
           <Text style={[styles.pillText, holding === "left" ? styles.pillTextOn : null]}>Left</Text>
+        </Pressable>
+        <Pressable style={[styles.pill, holding === "front" ? styles.pillOn : null]} onPress={onFront}>
+          <Text style={[styles.pillText, holding === "front" ? styles.pillTextOn : null]}>Front</Text>
         </Pressable>
         <Pressable style={[styles.pill, holding === "right" ? styles.pillOn : null]} onPress={onRight}>
           <Text style={[styles.pillText, holding === "right" ? styles.pillTextOn : null]}>Right</Text>

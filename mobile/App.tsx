@@ -5,7 +5,7 @@ import { requestRecordingPermissionsAsync, useAudioStream } from "expo-audio";
 import { StatusBar } from "expo-status-bar";
 import * as Location from "expo-location";
 import { DebugScreen } from "./src/DebugScreen";
-import { debugStopCue, debugTurnCue } from "./src/debug";
+import { DebugSide, debugStopCue, debugTurnCue, directionForDebugSide } from "./src/debug";
 import { demoLeftTurn } from "./src/demo";
 import { distanceM, LatLng } from "./src/geo";
 import { CueEngine, Fix, Route, fixAlong } from "./src/engine";
@@ -16,7 +16,7 @@ import { createPhoneRadio } from "./src/radio";
 import { PlaceChoice, routeBetween, searchPlaces } from "./src/routing";
 import { NavSession, ScreenState, idleScreen } from "./src/screen";
 import { StreetMap } from "./src/StreetMap";
-import { Cue, DIRECTION_LEFT, DIRECTION_RIGHT, SensorSample } from "./src/protocol";
+import { Cue, SensorSample } from "./src/protocol";
 import { VoiceCommand, VOICE_SAMPLE_RATE, prepareMicPcm, voiceKeyConfigured, whatsNextResult } from "./src/voice";
 import { VoiceAgent } from "./src/voiceAgent";
 import { connectGrokVoice, prepareVoiceAudio } from "./src/voiceLive";
@@ -66,8 +66,8 @@ function HelmetScreen() {
   const executeRef = useRef<(command: VoiceCommand) => Promise<string>>(async () => "{}");
   const [listening, setListening] = useState(false);
   const [voiceNote, setVoiceNote] = useState("");
-  const debugHoldRef = useRef<"left" | "right" | null>(null);
-  const [debugHold, setDebugHold] = useState<"left" | "right" | null>(null);
+  const debugHoldRef = useRef<DebugSide | null>(null);
+  const [debugHold, setDebugHold] = useState<DebugSide | null>(null);
   const [sensors, setSensors] = useState<SensorSample | null>(null);
   const { stream } = useAudioStream({
     sampleRate: VOICE_SAMPLE_RATE,
@@ -177,7 +177,7 @@ function HelmetScreen() {
     const timer = setInterval(() => {
       const side = debugHoldRef.current;
       if (!side) return;
-      void sendDebugCue(debugTurnCue(side === "left" ? DIRECTION_LEFT : DIRECTION_RIGHT));
+      void sendDebugCue(debugTurnCue(directionForDebugSide(side)));
     }, 1000);
     return () => clearInterval(timer);
   }, [debugHold]);
@@ -492,10 +492,10 @@ function HelmetScreen() {
     await link.send(cue, Date.now() / 1000);
   }
 
-  function holdDebug(side: "left" | "right"): void {
+  function holdDebug(side: DebugSide): void {
     debugHoldRef.current = side;
     setDebugHold(side);
-    void sendDebugCue(debugTurnCue(side === "left" ? DIRECTION_LEFT : DIRECTION_RIGHT));
+    void sendDebugCue(debugTurnCue(directionForDebugSide(side)));
   }
 
   function stopDebugCue(): void {
@@ -538,6 +538,7 @@ function HelmetScreen() {
             onBack={closeDebug}
             onConnect={() => void connectHelmet()}
             onLeft={() => holdDebug("left")}
+            onFront={() => holdDebug("front")}
             onRight={() => holdDebug("right")}
             onStop={stopDebugCue}
           />

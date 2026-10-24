@@ -8,7 +8,7 @@ import { CueEngine, fixAlong } from "./engine";
 import { debugStopCue, debugTurnCue, micLevel } from "./debug";
 import { advertisementFromScan, HelmetLink } from "./link";
 import { helmetScanPermissions } from "./scanPermissions";
-import { DIRECTION_LEFT, DIRECTION_RIGHT, encodeCue, encodeSensorSample, SENSOR_CHARACTERISTIC_UUID, SERVICE_UUID } from "./protocol";
+import { DIRECTION_FRONT, DIRECTION_LEFT, DIRECTION_RIGHT, encodeCue, encodeSensorSample, SENSOR_CHARACTERISTIC_UUID, SERVICE_UUID } from "./protocol";
 import { NavSession } from "./screen";
 import { VoiceAgent } from "./voiceAgent";
 import {
@@ -43,6 +43,7 @@ describe("phone navigator", () => {
       [0x01, 0x03, 0xe8, 0x03, 0x06, 0xff, 0xd4, 0x03, 0x0f, 0x00, 0x00, 0x00, 0xec, 0xff, 0xe0, 0x2e, 0x00, 0x00, 0x00, 0x00],
     );
     assert.equal(debugTurnCue(DIRECTION_LEFT).direction, DIRECTION_LEFT);
+    assert.equal(debugTurnCue(DIRECTION_FRONT).direction, DIRECTION_FRONT);
     assert.equal(debugTurnCue(DIRECTION_RIGHT).intensity, 160);
     assert.equal(debugStopCue().direction, 0);
     assert.equal(micLevel(16384) > 0.4 && micLevel(16384) < 0.6, true);
