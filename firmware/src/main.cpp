@@ -4,6 +4,7 @@
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
+#include <Wire.h>
 
 #include "actuators.h"
 #include "heading.h"
@@ -16,6 +17,52 @@ static const int kMotorPwmChannelLeft = 0;
 static const int kMotorPwmChannelFront = 1;
 static const int kMotorPwmChannelRight = 2;
 static const int kNotifyPeriodMs = 200;
+static const int kImuPeriodMs = 20;
+static const uint8_t kMpuPwrMgmt1 = 0x6B;
+static const uint8_t kMpuAccelOut = 0x3B;
+static uint8_t mpuAddress = 0x68;
+static bool mpuReady = false;
+
+static bool mpuWrite(uint8_t reg, uint8_t value) {
+    Wire.beginTransmission(mpuAddress);
+    Wire.write(reg);
+    Wire.write(value);
+    return Wire.endTransmission() == 0;
+}
+
+static bool mpuRead(float *ax, float *ay, float *az, float *gx, float *gy, float *gz) {
+    Wire.beginTransmission(mpuAddress);
+    Wire.write(kMpuAccelOut);
+    if (Wire.endTransmission(false) != 0) {
+        return false;
+    }
+    if (Wire.requestFrom(mpuAddress, (uint8_t)14) != 14) {
+        return false;
+    }
+    int16_t raw[7];
+    for (int index = 0; index < 7; index += 1) {
+        raw[index] = (int16_t)((Wire.read() << 8) | Wire.read());
+    }
+    *ax = raw[0] / 16384.0f;
+    *ay = raw[1] / 16384.0f;
+    *az = raw[2] / 16384.0f;
+    *gx = raw[4] / 131.0f;
+    *gy = raw[5] / 131.0f;
+    *gz = raw[6] / 131.0f;
+    return true;
+}
+
+static bool startMpu(void) {
+    Wire.begin(PIN_IMU_SDA, PIN_IMU_SCL);
+    Wire.setClock(400000);
+    for (uint8_t address = 0x68; address <= 0x69; address += 1) {
+        mpuAddress = address;
+        if (mpuWrite(kMpuPwrMgmt1, 0x00)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 static BLECharacteristic *helmetStateCharacteristic = nullptr;
 static Cue activeCue = {DIRECTION_NONE, 0, 0, 0, 0};
@@ -155,6 +202,8 @@ void setup(void) {
     digitalWrite(PIN_LED_LEFT, LOW);
     rightStrip.begin();
     applyCue(millis());
+    mpuReady = startMpu();
+    Serial.println(mpuReady ? "MPU6050 ready" : "MPU6050 missing");
 
     BLEDevice::init(DEVICE_NAME);
     BLEServer *server = BLEDevice::createServer();
@@ -183,8 +232,21 @@ void setup(void) {
 
 void loop(void) {
     static uint32_t lastNotifyMs = 0;
+    static uint32_t lastImuMs = 0;
     uint32_t now = millis();
     applyCue(now);
+    if (mpuReady && now - lastImuMs >= kImuPeriodMs) {
+        float ax;
+        float ay;
+        float az;
+        float gx;
+        float gy;
+        float gz;
+        if (mpuRead(&ax, &ay, &az, &gx, &gy, &gz)) {
+            Serial.printf("imu,%lu,%.4f,%.4f,%.4f,%.2f,%.2f,%.2f\n", now, ax, ay, az, gx, gy, gz);
+        }
+        lastImuMs = now;
+    }
     if (now - lastNotifyMs >= kNotifyPeriodMs) {
         notifyHelmetState();
         lastNotifyMs = now;
