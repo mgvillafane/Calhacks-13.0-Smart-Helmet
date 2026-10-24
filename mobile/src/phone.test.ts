@@ -5,8 +5,9 @@ import { gpsStatus, readingFromCoords } from "./gps";
 import { destinationPoint, nearestPlaces, osmBikeRouteRequest, placeChoices, routeFromOsrm } from "./routing";
 import { planTiles, mercatorTile } from "./tiles";
 import { CueEngine, fixAlong } from "./engine";
-import { HelmetLink } from "./link";
-import { DIRECTION_LEFT, encodeCue } from "./protocol";
+import { advertisementFromScan, HelmetLink } from "./link";
+import { helmetScanPermissions } from "./scanPermissions";
+import { DIRECTION_LEFT, encodeCue, SERVICE_UUID } from "./protocol";
 import { NavSession } from "./screen";
 
 describe("phone navigator", () => {
@@ -28,6 +29,24 @@ describe("phone navigator", () => {
     assert.equal(state.motors.left, true);
     assert.equal(state.motors.front, false);
     assert.equal(state.cueDirection, DIRECTION_LEFT);
+  });
+
+  it("scans with nearby devices on Android 12 and location before that", () => {
+    assert.equal(helmetScanPermissions(31), "nearby");
+    assert.equal(helmetScanPermissions(36), "nearby");
+    assert.equal(helmetScanPermissions(30), "location");
+  });
+
+  it("recognizes the helmet from its name or service uuid", () => {
+    assert.deepEqual(advertisementFromScan({ id: "bb", name: "SmartHelmet", localName: null, serviceUUIDs: null }), {
+      name: "SmartHelmet",
+      address: "bb",
+    });
+    assert.equal(advertisementFromScan({ id: "aa", name: "Headphones", localName: null, serviceUUIDs: null }), null);
+    assert.deepEqual(
+      advertisementFromScan({ id: "cc", name: null, localName: null, serviceUUIDs: [SERVICE_UUID.toUpperCase()] }),
+      { name: "SmartHelmet", address: "cc" },
+    );
   });
 
   it("connects only to the exact SmartHelmet name", async () => {

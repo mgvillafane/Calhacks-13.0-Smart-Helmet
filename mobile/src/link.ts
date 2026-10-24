@@ -3,6 +3,7 @@ import {
   Cue,
   DEVICE_NAME,
   DIRECTION_NONE,
+  SERVICE_UUID,
   HELMET_STATE_CHARACTERISTIC_UUID,
   decodeHelmetState,
   encodeCue,
@@ -13,6 +14,18 @@ export const RESEND_S = 1;
 export const HEADING_FRESH_S = 1;
 
 export type Advertisement = { name: string; address: string };
+
+export function advertisementFromScan(device: {
+  id: string;
+  name: string | null;
+  localName: string | null;
+  serviceUUIDs: string[] | null;
+}): Advertisement | null {
+  const name = (device.name || device.localName || "").trim();
+  const advertisesHelmet = (device.serviceUUIDs ?? []).some((uuid) => uuid.toLowerCase() === SERVICE_UUID);
+  if (name !== DEVICE_NAME && !advertisesHelmet) return null;
+  return { name: DEVICE_NAME, address: device.id };
+}
 
 export type Radio = {
   scan: () => Promise<Advertisement[]>;

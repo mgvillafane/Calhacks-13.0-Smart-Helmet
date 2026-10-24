@@ -184,7 +184,7 @@ function HelmetScreen() {
       const link = new HelmetLink(radio);
       const found = await link.scan();
       if (!found) {
-        setBleMessage("SmartHelmet was not found. The helmet must be advertising that exact name.");
+        setBleMessage("SmartHelmet was not found. If Android Bluetooth settings is connected to it, disconnect it there and try again.");
         return;
       }
       await link.connect(found);

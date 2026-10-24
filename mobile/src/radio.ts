@@ -1,6 +1,7 @@
-import { PermissionsAndroid, Platform } from "react-native";
-import { Advertisement, Radio } from "./link";
+import { Permission, PermissionsAndroid, Platform } from "react-native";
+import { Advertisement, advertisementFromScan, Radio } from "./link";
 import { HELMET_STATE_CHARACTERISTIC_UUID, SERVICE_UUID } from "./protocol";
+import { helmetScanPermissions } from "./scanPermissions";
 
 type Subscription = { remove: () => void };
 type Characteristic = { value: string | null };
@@ -8,6 +9,7 @@ type Device = {
   id: string;
   name: string | null;
   localName: string | null;
+  serviceUUIDs: string[] | null;
   discoverAllServicesAndCharacteristics: () => Promise<Device>;
   writeCharacteristicWithoutResponseForService: (service: string, characteristic: string, value: string) => Promise<unknown>;
   monitorCharacteristicForService: (
@@ -21,7 +23,7 @@ type Device = {
 type Manager = {
   startDeviceScan: (
     uuids: string[] | null,
-    options: null,
+    options: { scanMode: number; legacyScan: boolean } | null,
     listener: (error: Error | null, device: Device | null) => void,
   ) => void;
   stopDeviceScan: () => void;
@@ -30,6 +32,7 @@ type Manager = {
 };
 
 const SCAN_MS = 8000;
+const SCAN_LOW_LATENCY = 2;
 
 export async function createPhoneRadio(): Promise<Radio> {
   await requestBluetoothPermissions();
@@ -53,7 +56,9 @@ export async function createPhoneRadio(): Promise<Radio> {
           resolve([...found.values()]);
         }, SCAN_MS);
         try {
-          manager.startDeviceScan([SERVICE_UUID], null, (error, scanned) => {
+          // Android's service-UUID filter misses this helmet. Settings shows the name
+          // because it scans everything; the 128-bit UUID often sits in the scan response.
+          manager.startDeviceScan(null, { scanMode: SCAN_LOW_LATENCY, legacyScan: false }, (error, scanned) => {
             if (error) {
               clearTimeout(timer);
               manager.stopDeviceScan();
@@ -61,8 +66,8 @@ export async function createPhoneRadio(): Promise<Radio> {
               return;
             }
             if (!scanned) return;
-            const name = scanned.name || scanned.localName || "";
-            if (name) found.set(scanned.id, { name, address: scanned.id });
+            const match = advertisementFromScan(scanned);
+            if (match) found.set(match.address, match);
           });
         } catch (error) {
           clearTimeout(timer);
@@ -104,14 +109,27 @@ export async function createPhoneRadio(): Promise<Radio> {
 
 async function requestBluetoothPermissions(): Promise<void> {
   if (Platform.OS !== "android") return;
-  const permissions = [
-    PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-    PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
-  const result = await PermissionsAndroid.requestMultiple(permissions);
-  const denied = permissions.some((permission) => result[permission] !== PermissionsAndroid.RESULTS.GRANTED);
-  if (denied) throw new Error("Android needs Bluetooth and location permission before it can find SmartHelmet.");
+  const api = typeof Platform.Version === "number" ? Platform.Version : Number(Platform.Version);
+  // Android 12+ declares BLUETOOTH_SCAN as neverForLocation. Nearby devices is enough.
+  // Precise location can be off while the location switch is on, and must not block the scan.
+  const permissions =
+    helmetScanPermissions(api) === "nearby"
+      ? [PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN, PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT]
+      : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
+  const missing: Permission[] = [];
+  for (const permission of permissions) {
+    if (!(await PermissionsAndroid.check(permission))) missing.push(permission);
+  }
+  if (missing.length === 0) return;
+  const result = await PermissionsAndroid.requestMultiple(missing);
+  for (const permission of missing) {
+    if (result[permission] === PermissionsAndroid.RESULTS.GRANTED) continue;
+    if (await PermissionsAndroid.check(permission)) continue;
+    if (helmetScanPermissions(api) === "nearby") {
+      throw new Error("Allow Nearby devices for Smart Helmet. That permission is separate from the Bluetooth switch.");
+    }
+    throw new Error("Allow location for Smart Helmet so Android can scan for the helmet.");
+  }
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
