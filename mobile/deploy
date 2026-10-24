@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Build the Smart Helmet debug app and install it on the USB-connected phone.
+# adb's default streaming install stalls over usbip, so the APK is pushed instead.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+if [[ -z "${ANDROID_HOME:-}" && -d "$HOME/Android/Sdk" ]]; then
+  export ANDROID_HOME="$HOME/Android/Sdk"
+  export ANDROID_SDK_ROOT="$ANDROID_HOME"
+  export PATH="$PATH:$ANDROID_HOME/platform-tools"
+fi
+
+mapfile -t devices < <(adb devices | awk 'NR>1 && $2=="device" {print $1}')
+if [[ ${#devices[@]} -eq 0 ]]; then
+  echo "No Android device is ready. Attach the phone, then check: adb devices" >&2
+  exit 1
+fi
+if [[ ${#devices[@]} -gt 1 ]]; then
+  echo "More than one adb device is connected. Leave only the phone attached." >&2
+  exit 1
+fi
+serial="${devices[0]}"
+
+npm install
+
+(
+  cd android
+  ./gradlew :app:assembleDebug -x lint -x test --configure-on-demand --build-cache -PreactNativeDevServerPort=8081
+)
+
+apk="android/app/build/outputs/apk/debug/app-debug.apk"
+adb -s "$serial" install -r -d --no-streaming "$apk"
+adb -s "$serial" reverse tcp:8081 tcp:8081
+
+echo "Installed on ${serial}. Starting the dev server. Open Smart Helmet on the phone."
+# The phone reaches Metro through the adb reverse above. A LAN address is a WSL
+# address the handset cannot route to, which leaves the app on a black screen.
+exec npx expo start --dev-client --localhost --port 8081
