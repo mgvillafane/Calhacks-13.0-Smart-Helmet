@@ -1,6 +1,8 @@
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
 #include <BLE2902.h>
+#include <ESP_I2S.h>
+#include <driver/i2s_std.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -49,6 +51,27 @@ static bool mpuRead(float *ax, float *ay, float *az, float *gx, float *gy, float
     *gx = raw[4] / 131.0f;
     *gy = raw[5] / 131.0f;
     *gz = raw[6] / 131.0f;
+    return true;
+}
+
+static I2SClass microphone;
+static bool micReady = false;
+
+static bool startMicrophone(void) {
+    microphone.setPins(PIN_I2S_SCK, PIN_I2S_WS, -1, PIN_I2S_SD);
+    return microphone.begin(I2S_MODE_STD, 16000, I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO);
+}
+
+// INMP441 with L/R grounded fills the left half of each stereo frame.
+static bool readMicrophone(int32_t *sample) {
+    int32_t frames[128];
+    size_t bytes = 0;
+    esp_err_t err = i2s_channel_read(microphone.rxChan(), frames, sizeof(frames), &bytes, 0);
+    size_t count = bytes / sizeof(int32_t);
+    if (count < 2 || (err != ESP_OK && err != ESP_ERR_TIMEOUT)) {
+        return false;
+    }
+    *sample = frames[count - 2] >> 8;
     return true;
 }
 
@@ -204,6 +227,8 @@ void setup(void) {
     applyCue(millis());
     mpuReady = startMpu();
     Serial.println(mpuReady ? "MPU6050 ready" : "MPU6050 missing");
+    micReady = startMicrophone();
+    Serial.println(micReady ? "INMP441 ready" : "INMP441 missing");
 
     BLEDevice::init(DEVICE_NAME);
     BLEServer *server = BLEDevice::createServer();
@@ -233,8 +258,16 @@ void setup(void) {
 void loop(void) {
     static uint32_t lastNotifyMs = 0;
     static uint32_t lastImuMs = 0;
+    static uint32_t lastMicMs = 0;
     uint32_t now = millis();
     applyCue(now);
+    if (micReady && now - lastMicMs >= kImuPeriodMs) {
+        int32_t sample = 0;
+        if (readMicrophone(&sample)) {
+            Serial.printf("mic,%lu,%ld\n", now, (long)sample);
+        }
+        lastMicMs = now;
+    }
     if (mpuReady && now - lastImuMs >= kImuPeriodMs) {
         float ax;
         float ay;
