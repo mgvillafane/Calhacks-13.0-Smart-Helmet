@@ -63,6 +63,7 @@ test collision-alert thresholds carefully to avoid false reassurance.
 
 ## Files
 
+- `PLAN.md` - navigation app plan: phone routing, helmet vibration cues, deploy, and prize-track options. Not implemented yet.
 - `Helmet_Navigation.kicad_sch` - editable self-contained KiCad schematic.
 - `Helmet_Wiring_Overview.pdf` - 2-page overview and GPIO map.
 - `BOM_and_Pin_Map.csv` - parts, values, wiring notes.
