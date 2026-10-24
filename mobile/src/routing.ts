@@ -67,23 +67,61 @@ export function destinationPoint(text: string): LatLng | null {
   return [lat, lng];
 }
 
-export async function geocodePlace(query: string): Promise<{ point: LatLng; name: string }> {
+export type PlaceChoice = { name: string; detail: string; point: LatLng };
+
+export function placeChoices(places: { name?: string; display_name?: string; lat?: string; lon?: string }[]): PlaceChoice[] {
+  const choices: PlaceChoice[] = [];
+  for (const place of places) {
+    const lat = Number(place.lat);
+    const lng = Number(place.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const detail = place.display_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    const name = place.name || detail.split(",")[0] || "Place";
+    choices.push({ name, detail, point: [lat, lng] });
+  }
+  return choices;
+}
+
+export function nearestPlaces(choices: PlaceChoice[], near?: LatLng | null, limit = 5): PlaceChoice[] {
+  if (!near) return choices.slice(0, limit);
+  return [...choices]
+    .sort((a, b) => distanceM(near, a.point) - distanceM(near, b.point))
+    .slice(0, limit)
+    .map((choice) => ({ ...choice, detail: `${formatDistance(distanceM(near, choice.point))} · ${choice.detail}` }));
+}
+
+function formatDistance(meters: number): string {
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(1)} km`;
+}
+
+export async function searchPlaces(query: string, near?: LatLng | null): Promise<PlaceChoice[]> {
   const trimmed = query.trim();
-  if (!trimmed) throw new Error("Enter a place or latitude, longitude.");
+  if (!trimmed) return [];
   const direct = destinationPoint(trimmed);
-  if (direct) return { point: direct, name: trimmed };
+  if (direct) return [{ name: trimmed, detail: "Use these coordinates", point: direct }];
   const url = new URL(NOMINATIM_URL);
   url.searchParams.set("q", trimmed);
   url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("limit", "1");
+  url.searchParams.set("limit", "8");
+  url.searchParams.set("addressdetails", "0");
+  url.searchParams.set("dedupe", "1");
+  if (near) {
+    const span = 0.25;
+    url.searchParams.set("viewbox", `${near[1] - span},${near[0] + span},${near[1] + span},${near[0] - span}`);
+    url.searchParams.set("bounded", "0");
+  }
   const response = await fetch(url.toString(), { headers: { Accept: "application/json", "User-Agent": ROUTING_USER_AGENT } });
   if (!response.ok) throw new Error(`place search failed (${response.status})`);
-  const places = (await response.json()) as { lat?: string; lon?: string; display_name?: string }[];
-  const place = places[0];
-  const lat = Number(place?.lat);
-  const lng = Number(place?.lon);
-  if (!place || !Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error(`No place found for ${trimmed}.`);
-  return { point: [lat, lng], name: place.display_name || trimmed };
+  const places = (await response.json()) as { name?: string; display_name?: string; lat?: string; lon?: string }[];
+  return nearestPlaces(placeChoices(places), near);
+}
+
+export async function geocodePlace(query: string, near?: LatLng | null): Promise<{ point: LatLng; name: string }> {
+  const choices = await searchPlaces(query, near);
+  const place = choices[0];
+  if (!place) throw new Error(`No place found for ${query.trim() || "that search"}.`);
+  return { point: place.point, name: place.name };
 }
 
 export function orsRouteRequest(origin: LatLng, destination: LatLng, apiKey: string): HttpRequest {

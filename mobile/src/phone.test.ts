@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { demoLeftTurn, leftCueAtEightyMeters } from "./demo";
 import { gpsStatus, readingFromCoords } from "./gps";
-import { destinationPoint, osmBikeRouteRequest, routeFromOsrm } from "./routing";
+import { destinationPoint, nearestPlaces, osmBikeRouteRequest, placeChoices, routeFromOsrm } from "./routing";
 import { planTiles, mercatorTile } from "./tiles";
 import { CueEngine, fixAlong } from "./engine";
 import { HelmetLink } from "./link";
@@ -74,6 +74,17 @@ describe("phone navigator", () => {
     assert.equal(request.query.steps, "true");
     assert.equal(destinationPoint("37.87, -122.27")?.[0], 37.87);
     assert.equal(destinationPoint("Sather Gate"), null);
+    const choices = placeChoices([
+      { name: "Sather Gate", display_name: "Sather Gate, Berkeley, California", lat: "37.8702", lon: "-122.2595" },
+      { name: "Sather Tower", display_name: "Sather Tower, Berkeley, California", lat: "37.8722", lon: "-122.2578" },
+      { lat: "nope", lon: "-122.25" },
+    ]);
+    assert.equal(choices.length, 2);
+    assert.equal(choices[0].name, "Sather Gate");
+    assert.equal(choices[1].detail, "Sather Tower, Berkeley, California");
+    const nearest = nearestPlaces(choices, [37.8722, -122.2578]);
+    assert.equal(nearest[0].name, "Sather Tower");
+    assert.match(nearest[0].detail, /^0 m · Sather Tower/);
     const route = routeFromOsrm({
       code: "Ok",
       routes: [{

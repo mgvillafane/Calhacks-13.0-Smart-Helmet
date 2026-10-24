@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Dimensions, Keyboard, KeyboardEvent, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Location from "expo-location";
 import { demoLeftTurn } from "./src/demo";
 import { CueEngine, Fix, Route, fixAlong } from "./src/engine";
 import { GpsReading, gpsStatus, readingFromCoords } from "./src/gps";
 import { HelmetLink } from "./src/link";
 import { createPhoneRadio } from "./src/radio";
-import { geocodePlace, routeBetween } from "./src/routing";
+import { PlaceChoice, routeBetween, searchPlaces } from "./src/routing";
 import { NavSession, ScreenState } from "./src/screen";
 import { StreetMap } from "./src/StreetMap";
 
@@ -25,6 +25,10 @@ export default function App() {
   const [gpsMessage, setGpsMessage] = useState(gpsStatus(null, "unknown"));
   const [bleMessage, setBleMessage] = useState("Helmet not connected");
   const [destination, setDestination] = useState("");
+  const [choices, setChoices] = useState<PlaceChoice[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const skipSearch = useRef(false);
   const [status, setStatus] = useState("Demo route is ready. Play it indoors, or ride it with GPS.");
 
   useEffect(() => {
@@ -71,6 +75,59 @@ export default function App() {
       subscription?.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (skipSearch.current) {
+      skipSearch.current = false;
+      return undefined;
+    }
+    const query = destination.trim();
+    if (query.length < 2) {
+      setChoices([]);
+      setSearching(false);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void loadPlaces(query, cancelled, () => cancelled);
+    }, 450);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [destination]);
+
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardDidShow", (event: KeyboardEvent) => {
+      const windowHeight = Dimensions.get("window").height;
+      setKeyboardHeight(Math.max(0, windowHeight - event.endCoordinates.screenY));
+    });
+    const hide = Keyboard.addListener("keyboardDidHide", () => setKeyboardHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  async function loadPlaces(query: string, alreadyCancelled: boolean, isCancelled: () => boolean): Promise<void> {
+    if (alreadyCancelled) return;
+    setSearching(true);
+    try {
+      const near = gpsRef.current ? ([gpsRef.current.lat, gpsRef.current.lng] as const) : null;
+      const found = await searchPlaces(query, near);
+      if (!isCancelled()) {
+        setChoices(found);
+        if (found.length === 0) setStatus(`No places matched “${query}”.`);
+      }
+    } catch (error) {
+      if (!isCancelled()) {
+        setChoices([]);
+        setStatus(error instanceof Error ? error.message : "Place search failed.");
+      }
+    } finally {
+      if (!isCancelled()) setSearching(false);
+    }
+  }
 
   function acceptGps(position: Location.LocationObject): void {
     const reading = readingFromCoords(position.coords);
@@ -171,11 +228,14 @@ export default function App() {
     setStatus("Ride north, then left. Your GPS position is on the map.");
   }
 
-  async function fetchStreetRoute(): Promise<void> {
+  async function choosePlace(place: PlaceChoice): Promise<void> {
+    Keyboard.dismiss();
+    skipSearch.current = true;
+    setChoices([]);
+    setDestination(place.name);
     const here = await currentGps();
     if (!here) return;
     try {
-      const place = await geocodePlace(destination);
       const result = await routeBetween([here.lat, here.lng], place.point, process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? "");
       useRoute(result.route, result.provider, place.name);
       sessionRef.current.start();
@@ -194,6 +254,15 @@ export default function App() {
     }
   }
 
+  async function findPlaces(): Promise<void> {
+    const query = destination.trim();
+    if (query.length < 2) {
+      setStatus("Type a place name, then pick one from the list.");
+      return;
+    }
+    await loadPlaces(query, false, () => false);
+  }
+
   function playDemo(): void {
     setRide(false);
     if (screen.phase === "preview" || screen.phase === "idle") {
@@ -206,31 +275,54 @@ export default function App() {
     setStatus("Playing the left turn at 8 m/s.");
   }
 
+  const typing = keyboardHeight > 0 || choices.length > 0 || searching;
+
   return (
-    <View style={styles.page}>
+    <View style={[styles.page, { paddingBottom: 16 + keyboardHeight }]}>
       <Text style={styles.title}>{screen.instruction || "Smart Helmet"}</Text>
-      <Text style={styles.meta}>
-        {screen.destinationName || "No route"} · {screen.phase} · {riding ? "following GPS" : "GPS idle"} · {screen.metersToJunction} m
-      </Text>
-      <View style={styles.mapWrap}>
-        <StreetMap screen={screen} />
+      {typing ? null : (
+        <Text style={styles.meta}>
+          {screen.destinationName || "No route"} · {screen.phase} · {riding ? "following GPS" : "GPS idle"} · {screen.metersToJunction} m
+        </Text>
+      )}
+      <View style={styles.body}>
+        <View style={[styles.mapWrap, typing ? styles.mapTyping : null]}>
+          <StreetMap screen={screen} />
+        </View>
+        {typing ? null : (
+          <>
+            <View style={styles.motors}>
+              <Motor label="Left" on={screen.motors.left} />
+              <Motor label="Front" on={screen.motors.front} />
+              <Motor label="Right" on={screen.motors.right} />
+            </View>
+            {screen.banner ? <Text style={styles.banner}>{screen.banner}</Text> : null}
+            <Text style={styles.gps}>{gpsMessage}</Text>
+            <Text style={styles.status}>{status}</Text>
+            <Text style={styles.status}>{bleMessage}</Text>
+            <View style={styles.row}>
+              <AppButton label={playing ? "Pause" : "Play demo"} onPress={() => (playing ? setPlaying(false) : playDemo())} />
+              <AppButton label="Ride here" onPress={() => void rideHere()} />
+              <AppButton label="Connect" onPress={() => void connectHelmet()} />
+            </View>
+          </>
+        )}
+        {searching ? <Text style={styles.status}>Searching places…</Text> : null}
+        {choices.length > 0 ? (
+          <ScrollView style={styles.choices} keyboardShouldPersistTaps="handled">
+            {choices.map((place, index) => (
+              <Pressable key={`${place.point[0]},${place.point[1]},${index}`} style={styles.choice} onPress={() => void choosePlace(place)}>
+                <Text style={styles.choiceName} numberOfLines={1}>{place.name}</Text>
+                <Text style={styles.choiceDetail} numberOfLines={2}>{place.detail}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : null}
       </View>
-      <View style={styles.motors}>
-        <Motor label="Left" on={screen.motors.left} />
-        <Motor label="Front" on={screen.motors.front} />
-        <Motor label="Right" on={screen.motors.right} />
+      <View style={styles.searchRow}>
+        <TextInput style={[styles.input, styles.searchInput]} value={destination} onChangeText={setDestination} placeholder="Place name or latitude, longitude" placeholderTextColor="#8b93a7" autoCapitalize="words" returnKeyType="search" onSubmitEditing={() => void findPlaces()} />
+        <AppButton label="Find" onPress={() => void findPlaces()} />
       </View>
-      {screen.banner ? <Text style={styles.banner}>{screen.banner}</Text> : null}
-      <Text style={styles.gps}>{gpsMessage}</Text>
-      <Text style={styles.status}>{status}</Text>
-      <Text style={styles.status}>{bleMessage}</Text>
-      <View style={styles.row}>
-        <AppButton label={playing ? "Pause" : "Play demo"} onPress={() => (playing ? setPlaying(false) : playDemo())} />
-        <AppButton label="Ride here" onPress={() => void rideHere()} />
-        <AppButton label="Connect" onPress={() => void connectHelmet()} />
-      </View>
-      <TextInput style={styles.input} value={destination} onChangeText={setDestination} placeholder="Place name or latitude, longitude" placeholderTextColor="#8b93a7" autoCapitalize="words" />
-      <AppButton label="Route from here" onPress={() => void fetchStreetRoute()} />
     </View>
   );
 }
@@ -255,7 +347,9 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#10141c", padding: 16, paddingTop: 54, gap: 8 },
   title: { color: "#f0f3f8", fontSize: 22, fontWeight: "700" },
   meta: { color: "#b7c0d0", fontSize: 14 },
-  mapWrap: { flex: 1, minHeight: 320, borderRadius: 12, overflow: "hidden" },
+  body: { flex: 1, gap: 8 },
+  mapWrap: { flex: 1, minHeight: 160, borderRadius: 12, overflow: "hidden" },
+  mapTyping: { flex: 0, height: 120, minHeight: 0 },
   motors: { flexDirection: "row", gap: 8 },
   motor: { flex: 1, borderRadius: 10, padding: 12, backgroundColor: "#242b3a" },
   motorOn: { backgroundColor: "#315dcc" },
@@ -267,4 +361,10 @@ const styles = StyleSheet.create({
   button: { backgroundColor: "#315dcc", borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12 },
   buttonText: { color: "#f0f3f8", fontWeight: "700" },
   input: { borderWidth: 1, borderColor: "#30384a", borderRadius: 10, color: "#f0f3f8", padding: 10 },
+  searchRow: { flexDirection: "row", gap: 8, alignItems: "center" },
+  searchInput: { flex: 1 },
+  choices: { flex: 1, borderWidth: 1, borderColor: "#30384a", borderRadius: 10 },
+  choice: { paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#242b3a" },
+  choiceName: { color: "#f0f3f8", fontWeight: "700" },
+  choiceDetail: { color: "#b7c0d0", fontSize: 12 },
 });
