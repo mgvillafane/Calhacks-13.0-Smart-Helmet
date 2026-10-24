@@ -9,6 +9,8 @@
 #include <Wire.h>
 
 #include "actuators.h"
+#include "blinker.h"
+#include "brake.h"
 #include "heading.h"
 #include "pins.h"
 #include "protocol.h"
@@ -146,6 +148,23 @@ static bool leftTurnLevel(uint32_t now) {
     return activeCue.direction == DIRECTION_LEFT || activeCue.direction == DIRECTION_UTURN;
 }
 
+static void sendBlinker(uint32_t now, bool braking) {
+    static uint8_t lastTurn = 0;
+    static uint8_t lastBrake = 0;
+    static uint32_t lastSentMs = 0;
+    uint32_t age = cueFresh ? now - cueReceivedMs : 0;
+    uint8_t turn = blinker_command(&activeCue, age, cueFresh);
+    uint8_t brake = braking ? BLINKER_BRAKE : BLINKER_RELEASE;
+    if (turn == lastTurn && brake == lastBrake && now - lastSentMs < kNotifyPeriodMs) {
+        return;
+    }
+    Serial1.write(turn);
+    Serial1.write(brake);
+    lastTurn = turn;
+    lastBrake = brake;
+    lastSentMs = now;
+}
+
 static void applyCue(uint32_t now) {
     ActuatorFrame frame;
     uint32_t age = cueFresh ? now - cueReceivedMs : 0;
@@ -204,6 +223,7 @@ class CueCallbacks : public BLECharacteristicCallbacks {
 
 void setup(void) {
     Serial.begin(115200);
+    Serial1.begin(115200, SERIAL_8N1, PIN_BLINKER_RX, PIN_BLINKER_TX);
 
     pinMode(PIN_BUTTON_MODE, INPUT_PULLUP);
     pinMode(PIN_BUTTON_SOS, INPUT_PULLUP);
@@ -259,6 +279,8 @@ void loop(void) {
     static uint32_t lastNotifyMs = 0;
     static uint32_t lastImuMs = 0;
     static uint32_t lastMicMs = 0;
+    static BrakeState brakeState = {};
+    static bool braking = false;
     uint32_t now = millis();
     applyCue(now);
     if (micReady && now - lastMicMs >= kImuPeriodMs) {
@@ -277,9 +299,11 @@ void loop(void) {
         float gz;
         if (mpuRead(&ax, &ay, &az, &gx, &gy, &gz)) {
             Serial.printf("imu,%lu,%.4f,%.4f,%.4f,%.2f,%.2f,%.2f\n", now, ax, ay, az, gx, gy, gz);
+            braking = brake_update(&brakeState, ax, ay, az, gy, now - lastImuMs) == 1;
         }
         lastImuMs = now;
     }
+    sendBlinker(now, braking);
     if (now - lastNotifyMs >= kNotifyPeriodMs) {
         notifyHelmetState();
         lastNotifyMs = now;

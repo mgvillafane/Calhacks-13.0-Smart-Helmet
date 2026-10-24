@@ -1,4 +1,6 @@
 #include "actuators.h"
+#include "blinker.h"
+#include "brake.h"
 #include "heading.h"
 
 #include <stdio.h>
@@ -129,6 +131,62 @@ static ImuSample level_sample(float mx, float my) {
     return sample;
 }
 
+static void test_blinker_command_copies_direction(void) {
+    Cue left = cue_of(DIRECTION_LEFT, 160, 800);
+    Cue right = cue_of(DIRECTION_RIGHT, 160, 800);
+    Cue uturn = cue_of(DIRECTION_UTURN, 160, 800);
+    Cue front = cue_of(DIRECTION_FRONT, 160, 200);
+    Cue none = cue_of(DIRECTION_NONE, 160, 800);
+    Cue dim = cue_of(DIRECTION_LEFT, 0, 800);
+
+    expect(blinker_command(&left, 0, true) == BLINKER_LEFT, "left cue commands left");
+    expect(blinker_command(&right, 0, true) == BLINKER_RIGHT, "right cue commands right");
+    expect(blinker_command(&uturn, 0, true) == BLINKER_UTURN, "u-turn keeps its own command");
+    expect(blinker_command(&front, 0, true) == BLINKER_OFF, "front leaves the blinkers off");
+    expect(blinker_command(&none, 0, true) == BLINKER_OFF, "none is off");
+    expect(blinker_command(&dim, 0, true) == BLINKER_OFF, "zero intensity is off");
+    expect(blinker_command(&left, CUE_STALE_MS + 1, true) == BLINKER_OFF, "stale cue is off");
+    expect(blinker_command(&left, 0, false) == BLINKER_OFF, "dropped link is off");
+    expect(blinker_command(NULL, 0, true) == BLINKER_OFF, "missing cue is off");
+}
+
+static int feed_brake(BrakeState *state, float ax, float pitch_dps, int samples) {
+    int braking = 0;
+    for (int index = 0; index < samples; index += 1) {
+        braking = brake_update(state, ax, 0.0f, 1.0f, pitch_dps, 20);
+    }
+    return braking;
+}
+
+static void test_imu_brake_uses_forward_deceleration(void) {
+    BrakeState state;
+    BrakeState tilted;
+    BrakeState nod;
+
+    memset(&state, 0, sizeof(state));
+    memset(&tilted, 0, sizeof(tilted));
+    memset(&nod, 0, sizeof(nod));
+
+    expect(brake_update(NULL, 0.4f, 0.0f, 1.0f, 0.0f, 20) == 0, "missing brake state");
+    expect(feed_brake(&state, 0.0f, 0.0f, 10) == 0, "level rest is not braking");
+    expect(feed_brake(&state, 0.30f, 0.0f, 4) == 0, "80 ms is not yet a brake");
+    expect(feed_brake(&state, 0.30f, 0.0f, 1) == 1, "100 ms of deceleration brakes");
+    expect(feed_brake(&state, 0.30f, 0.0f, 100) == 1, "gravity stays put while braking");
+    expect(feed_brake(&state, 0.0f, 0.0f, 9) == 1, "release waits 200 ms");
+    expect(feed_brake(&state, 0.0f, 0.0f, 1) == 0, "calm axis releases the brake");
+
+    memset(&state, 0, sizeof(state));
+    expect(feed_brake(&state, 0.0f, 0.0f, 5) == 0, "prime before a bump");
+    expect(feed_brake(&state, 1.0f, 0.0f, 1) == 0, "one sample is a bump");
+    expect(feed_brake(&state, 0.0f, 0.0f, 1) == 0, "bump does not latch");
+
+    expect(brake_update(&tilted, 0.34f, 0.0f, 0.94f, 0.0f, 20) == 0, "first tilted sample");
+    expect(feed_brake(&tilted, 0.34f, 0.0f, 20) == 0, "a fixed tilt is not braking");
+
+    expect(feed_brake(&nod, 0.0f, 0.0f, 5) == 0, "prime before a nod");
+    expect(feed_brake(&nod, 0.50f, 90.0f, 15) == 0, "a nod is not braking");
+}
+
 static void test_level_heading_cardinals(void) {
     uint16_t decidegrees = 1;
     ImuSample north = level_sample(1.0f, 0.0f);
@@ -213,6 +271,8 @@ int main(void) {
     test_uturn_alternates_sides();
     test_pulse_period_and_stale_cue();
     test_quiet_and_dropped_cues_are_dark();
+    test_blinker_command_copies_direction();
+    test_imu_brake_uses_forward_deceleration();
     test_level_heading_cardinals();
     test_tilt_keeps_north();
     test_unusable_imu_publishes_the_invalid_sentinel();

@@ -19,3 +19,7 @@
 #define PIN_MOTOR_LEFT 17
 #define PIN_MOTOR_FRONT 18
 #define PIN_MOTOR_RIGHT 21
+
+/* UART to the blinker Arduino. TX goes to Arduino RX, RX to Arduino TX. */
+#define PIN_BLINKER_TX 12
+#define PIN_BLINKER_RX 13
