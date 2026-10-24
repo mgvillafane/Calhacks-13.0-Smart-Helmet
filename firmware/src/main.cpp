@@ -44,10 +44,11 @@ static void writeMotor(int pin, int channel, uint8_t intensity) {
 #endif
 }
 
-static Rgb lastLeftLeds[LED_PIXELS];
+// static Rgb lastLeftLeds[LED_PIXELS];
 static Rgb lastRightLeds[LED_PIXELS];
 static bool ledCacheReady = false;
-static Adafruit_NeoPixel leftStrip(LED_PIXELS, PIN_LED_LEFT, NEO_GRB + NEO_KHZ800);
+// GPIO 10 debug: the WS2812 bitstream is too fast to see. The pin is a plain level below.
+// static Adafruit_NeoPixel leftStrip(LED_PIXELS, PIN_LED_LEFT, NEO_GRB + NEO_KHZ800);
 static Adafruit_NeoPixel rightStrip(LED_PIXELS, PIN_LED_RIGHT, NEO_GRB + NEO_KHZ800);
 
 static void writeMotors(const ActuatorFrame *frame) {
@@ -67,6 +68,14 @@ static void showStrip(Adafruit_NeoPixel *strip, const Rgb *pixels, Rgb *cache) {
     strip->show();
 }
 
+static bool leftTurnLevel(uint32_t now) {
+    uint32_t age = cueFresh ? now - cueReceivedMs : 0;
+    if (!cueFresh || age > CUE_STALE_MS || activeCue.intensity == 0) {
+        return false;
+    }
+    return activeCue.direction == DIRECTION_LEFT || activeCue.direction == DIRECTION_UTURN;
+}
+
 static void applyCue(uint32_t now) {
     ActuatorFrame frame;
     uint32_t age = cueFresh ? now - cueReceivedMs : 0;
@@ -74,7 +83,8 @@ static void applyCue(uint32_t now) {
         memset(&frame, 0, sizeof(frame));
     }
     writeMotors(&frame);
-    showStrip(&leftStrip, frame.led_left, lastLeftLeds);
+    // showStrip(&leftStrip, frame.led_left, lastLeftLeds);
+    digitalWrite(PIN_LED_LEFT, leftTurnLevel(now) ? HIGH : LOW);
     showStrip(&rightStrip, frame.led_right, lastRightLeds);
     ledCacheReady = true;
 }
@@ -140,7 +150,9 @@ void setup(void) {
     ledcAttachPin(PIN_MOTOR_FRONT, kMotorPwmChannelFront);
     ledcAttachPin(PIN_MOTOR_RIGHT, kMotorPwmChannelRight);
 #endif
-    leftStrip.begin();
+    // leftStrip.begin();
+    pinMode(PIN_LED_LEFT, OUTPUT);
+    digitalWrite(PIN_LED_LEFT, LOW);
     rightStrip.begin();
     applyCue(millis());
 
