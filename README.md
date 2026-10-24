@@ -11,7 +11,7 @@ in the generation environment. Run ERC and review connections before assembly.
 
 - Power: FKE8002 USB power bank (regulated 5V), USB breakout, F1 1.5A PTC, SW1 switch.
 - Controller: ESP32-S3-DevKitC-1 (N16R8) on 5V; onboard 3.3V regulator feeds sensors.
-- Navigation: phone GPS + destination over Bluetooth Low Energy; no separate GNSS chip.
+- Navigation: the phone owns GPS and routing. It writes an 8-byte vibration cue to the ESP32-S3 over BLE. The ESP32 notifies heading and button state. No separate GNSS chip.
 - IMU: LSM6DSOX + LIS3MDL 9-DoF breakout, powered at 3.3V and read by I2C.
 - Microphone: INMP441 I2S breakout at **3.3V only**; L/R tied GND.
 - Motors: 3 x 3V ERM coin motors on a dedicated, preadjusted 3.0V buck rail.
@@ -61,9 +61,23 @@ Do not cut, drill, modify the protective helmet shell, or compromise fit.
 Secure and weatherproof wiring outside the helmet's protective structure;​
 test collision-alert thresholds carefully to avoid false reassurance.
 
+## Install
+
+Expo Go cannot install the app. `react-native-ble-plx` and `@rnmapbox/maps` are native modules, so each phone needs its own build. Only one phone connects to the helmet at a time.
+
+Android is one arm64 release APK. Allow install from unknown sources, then open the APK. Android 12 and newer also ask for Nearby devices.
+
+An iPhone needs Xcode and a free Apple ID. That install lasts about 7 days. A paid Apple Developer account can use TestFlight instead.
+
+The Mapbox token must list the Android `applicationId` and the iOS bundle id. The token is not in git. OpenRouteService is not used. Street routes and the map come from OpenStreetMap, with no routing key.
+
+Flash the helmet from `firmware/` with `pio run -t upload` for the `esp32-s3-devkitc-1` environment. The board advertises as `SmartHelmet`.
+
 ## Files
 
-- `PLAN.md` - navigation app plan: phone routing, helmet vibration cues, deploy, and prize-track options. Not implemented yet.
+- `PLAN.md` - navigation app plan: phone routing, helmet vibration cues, deploy, and prize-track options.
+- `shared/cue-protocol.md` - BLE packet layout between the phone and the ESP32-S3.
+- `firmware/` - ESP32-S3 peripheral. It advertises as `SmartHelmet`, accepts the cue, and pulses the motors.
 - `Helmet_Navigation.kicad_sch` - editable self-contained KiCad schematic.
 - `Helmet_Wiring_Overview.pdf` - 2-page overview and GPIO map.
 - `BOM_and_Pin_Map.csv` - parts, values, wiring notes.

@@ -1,0 +1,277 @@
+import { ComponentType, useEffect, useRef } from "react";
+import { StyleSheet } from "react-native";
+import { WebView } from "react-native-webview";
+import { ScreenState } from "./screen";
+
+const MapWeb = WebView as unknown as ComponentType<Record<string, unknown>>;
+
+const MAP_HTML = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <style>
+    html, body, #map { margin: 0; height: 100%; width: 100%; background: #d5dde8; overflow: hidden; touch-action: none; }
+    #tiles { position: absolute; inset: 0; }
+    #tiles img { position: absolute; width: 256px; height: 256px; }
+    #draw { position: absolute; inset: 0; width: 100%; height: 100%; }
+    #credit { position: absolute; right: 6px; bottom: 4px; background: rgba(255,255,255,.85); color: #222; font: 11px sans-serif; padding: 1px 4px; }
+    #status { position: absolute; left: 8px; top: 8px; color: #163a8a; font: 13px sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="map">
+    <div id="tiles"></div>
+    <canvas id="draw"></canvas>
+    <div id="credit">© OpenStreetMap</div>
+    <div id="status">Loading streets…</div>
+  </div>
+  <script>
+    var TILE = 256;
+    var zoom = 16;
+    var center = { lat: 37.8703, lng: -122.2595 };
+    var ride = { traveled: [], remaining: [], puck: null, decision: null, follow: false, routeKey: "" };
+    var seenRoute = "";
+    var userMoved = false;
+    var tilesLoaded = 0;
+    var mapEl = document.getElementById("map");
+    var tileBox = document.getElementById("tiles");
+    var canvas = document.getElementById("draw");
+    var ctx = canvas.getContext("2d");
+    var statusEl = document.getElementById("status");
+    var images = {};
+
+    function world(lat, lng, z) {
+      var n = Math.pow(2, z);
+      var x = (lng + 180) / 360 * n;
+      var s = Math.sin(lat * Math.PI / 180);
+      var y = (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n;
+      return { x: x, y: y };
+    }
+    function unworld(x, y, z) {
+      var n = Math.pow(2, z);
+      var lng = x / n * 360 - 180;
+      var lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180 / Math.PI;
+      return { lat: lat, lng: lng };
+    }
+    function size() {
+      var rect = mapEl.getBoundingClientRect();
+      return { w: rect.width || window.innerWidth, h: rect.height || window.innerHeight };
+    }
+    function screenPoint(lat, lng) {
+      var box = size();
+      var c = world(center.lat, center.lng, zoom);
+      var p = world(lat, lng, zoom);
+      return [box.w / 2 + (p.x - c.x) * TILE, box.h / 2 + (p.y - c.y) * TILE];
+    }
+    function renderTiles() {
+      var box = size();
+      var c = world(center.lat, center.lng, zoom);
+      var left = c.x - box.w / 2 / TILE;
+      var top = c.y - box.h / 2 / TILE;
+      var x0 = Math.floor(left);
+      var y0 = Math.floor(top);
+      var x1 = Math.floor(left + box.w / TILE);
+      var y1 = Math.floor(top + box.h / TILE);
+      var limit = Math.pow(2, zoom);
+      var keep = {};
+      for (var y = y0; y <= y1; y++) {
+        for (var x = x0; x <= x1; x++) {
+          if (y < 0 || y >= limit) continue;
+          var wrapped = ((x % limit) + limit) % limit;
+          var key = zoom + "/" + wrapped + "/" + y;
+          keep[key] = true;
+          var img = images[key];
+          if (!img) {
+            img = document.createElement("img");
+            img.alt = "";
+            img.src = "https://tile.openstreetmap.org/" + key + ".png";
+            img.onload = function () { tilesLoaded += 1; statusEl.textContent = ""; };
+            img.onerror = function () { if (!tilesLoaded) statusEl.textContent = "Street tiles did not load. Check the internet connection."; };
+            images[key] = img;
+            tileBox.appendChild(img);
+          }
+          img.style.left = ((x - left) * TILE) + "px";
+          img.style.top = ((y - top) * TILE) + "px";
+        }
+      }
+      Object.keys(images).forEach(function (key) {
+        if (!keep[key]) {
+          images[key].remove();
+          delete images[key];
+        }
+      });
+    }
+    function stroke(points, color, width) {
+      if (!points || points.length < 2) return;
+      ctx.beginPath();
+      points.forEach(function (point, index) {
+        var xy = screenPoint(point[0], point[1]);
+        if (index === 0) ctx.moveTo(xy[0], xy[1]);
+        else ctx.lineTo(xy[0], xy[1]);
+      });
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = width + 4;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.stroke();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.stroke();
+    }
+    function dot(point, color, radius) {
+      if (!point) return;
+      var xy = screenPoint(point[0], point[1]);
+      ctx.beginPath();
+      ctx.arc(xy[0], xy[1], radius, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(xy[0], xy[1], radius - 2, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+    function render() {
+      var box = size();
+      var dpr = window.devicePixelRatio || 1;
+      canvas.width = box.w * dpr;
+      canvas.height = box.h * dpr;
+      canvas.style.width = box.w + "px";
+      canvas.style.height = box.h + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      renderTiles();
+      ctx.clearRect(0, 0, box.w, box.h);
+      stroke(ride.traveled, "#8b93a7", 5);
+      stroke(ride.remaining, "#2f6fed", 6);
+      dot(ride.decision, "#e2a322", 7);
+      dot(ride.puck, "#163a8a", 8);
+    }
+    function fit(points) {
+      var box = size();
+      if (!points || points.length < 2 || box.w < 20) return;
+      var chosen = 3;
+      for (var z = 17; z >= 3; z--) {
+        var projected = points.map(function (point) { return world(point[0], point[1], z); });
+        var xs = projected.map(function (point) { return point.x; });
+        var ys = projected.map(function (point) { return point.y; });
+        var bw = (Math.max.apply(null, xs) - Math.min.apply(null, xs)) * TILE;
+        var bh = (Math.max.apply(null, ys) - Math.min.apply(null, ys)) * TILE;
+        if (bw < box.w - 64 && bh < box.h - 64) { chosen = z; break; }
+      }
+      zoom = chosen;
+      var sx = 0;
+      var sy = 0;
+      points.forEach(function (point) {
+        var p = world(point[0], point[1], zoom);
+        sx += p.x;
+        sy += p.y;
+      });
+      center = unworld(sx / points.length, sy / points.length, zoom);
+    }
+    function showRide(state) {
+      ride = state || ride;
+      var points = (ride.traveled || []).concat(ride.remaining || []);
+      var changed = ride.routeKey !== seenRoute;
+      if (changed) { seenRoute = ride.routeKey; userMoved = false; }
+      if (ride.follow && ride.puck && !userMoved) {
+        center = { lat: ride.puck[0], lng: ride.puck[1] };
+        if (changed) zoom = 16;
+      } else if (changed) {
+        fit(points);
+      }
+      render();
+    }
+    window.showRide = showRide;
+
+    var touches = {};
+    var pinch = 0;
+    function touchList(event) {
+      touches = {};
+      for (var i = 0; i < event.touches.length; i++) {
+        var t = event.touches[i];
+        touches[t.identifier] = { x: t.clientX, y: t.clientY };
+      }
+    }
+    function pinchDistance() {
+      var ids = Object.keys(touches);
+      if (ids.length < 2) return 0;
+      var a = touches[ids[0]];
+      var b = touches[ids[1]];
+      var dx = a.x - b.x;
+      var dy = a.y - b.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+    mapEl.addEventListener("touchstart", function (event) {
+      touchList(event);
+      pinch = pinchDistance();
+    }, { passive: true });
+    mapEl.addEventListener("touchmove", function (event) {
+      event.preventDefault();
+      var ids = Object.keys(touches);
+      if (ids.length === 1 && event.touches.length === 1) {
+        var previous = touches[event.touches[0].identifier];
+        var dx = event.touches[0].clientX - previous.x;
+        var dy = event.touches[0].clientY - previous.y;
+        var c = world(center.lat, center.lng, zoom);
+        center = unworld(c.x - dx / TILE, c.y - dy / TILE, zoom);
+        userMoved = true;
+        render();
+      } else if (event.touches.length === 2) {
+        touchList(event);
+        var next = pinchDistance();
+        if (pinch && next) {
+          if (next > pinch * 1.12 && zoom < 18) { zoom += 1; pinch = next; userMoved = true; render(); }
+          else if (next < pinch * 0.88 && zoom > 3) { zoom -= 1; pinch = next; userMoved = true; render(); }
+        }
+        return;
+      }
+      touchList(event);
+    }, { passive: false });
+    mapEl.addEventListener("touchend", function (event) { touchList(event); pinch = pinchDistance(); });
+    window.addEventListener("resize", render);
+    render();
+  </script>
+</body>
+</html>`;
+
+export function StreetMap({ screen }: { screen: ScreenState }) {
+  const webRef = useRef<WebView>(null);
+  const latest = useRef(screen);
+  latest.current = screen;
+
+  function push(next: ScreenState): void {
+    const payload = {
+      traveled: next.traveled,
+      remaining: next.remaining,
+      puck: next.puck,
+      decision: next.decisionMarker,
+      heading: next.puckHeadingDeg,
+      follow: next.phase === "navigating" && next.puck != null,
+      routeKey: next.destinationName,
+    };
+    webRef.current?.injectJavaScript(`window.showRide && window.showRide(${JSON.stringify(payload)}); true;`);
+  }
+
+  useEffect(() => {
+    push(screen);
+  }, [screen]);
+
+  return (
+    <MapWeb
+      ref={webRef}
+      originWhitelist={["*"]}
+      source={{ html: MAP_HTML, baseUrl: "https://tile.openstreetmap.org/" }}
+      style={styles.map}
+      javaScriptEnabled
+      domStorageEnabled
+      scrollEnabled={false}
+      setSupportMultipleWindows={false}
+      applicationNameForUserAgent="SmartHelmet/1.0"
+      onLoadEnd={() => push(latest.current)}
+    />
+  );
+}
+
+const styles = StyleSheet.create({
+  map: { flex: 1, backgroundColor: "#d5dde8" },
+});

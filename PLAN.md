@@ -4,28 +4,28 @@ overview: Build a React Native app that keeps a live cycling route from the best
 todos:
   - id: protocol
     content: Write shared BLE cue and helmet-state packet spec, then constants in mobile and firmware
-    status: pending
+    status: in_progress
   - id: routing
     content: Add RouteProvider with Mapbox primary and OpenRouteService fallback
-    status: pending
+    status: completed
   - id: engine
     content: Implement GPS watch, heading fusion, decision-point cue engine, and route simulator
-    status: pending
+    status: completed
   - id: viz
     content: "Build map screen: route, puck, decision marker, and motor diagram bound to the same Cue"
-    status: pending
+    status: in_progress
   - id: ble-mobile
     content: Connect to SmartHelmet, write cues, and subscribe to heading
-    status: pending
+    status: completed
   - id: firmware
     content: ESP32-S3 BLE peripheral, PWM on GPIO 17/18/21, IMU heading notify, LED mirror
-    status: pending
+    status: in_progress
   - id: readme
     content: Update README navigation bullet to the phone-computes-cue split
-    status: pending
+    status: completed
   - id: deploy
     content: Document Android APK sideload and iOS Xcode or TestFlight install, including Mapbox bundle-id token setup
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -189,6 +189,29 @@ Weekend stack if we only build one layer: Convex ride log (3–5 h, high prize v
 - Creao: criteria doc did not open. Do not schedule it until we know they require the Creao product. Cash is real, fit is unknown.
 - Solana, Visa shopping, and Presage: 6–12 h each, low rider fit, leave out. Armadin, Elastic, AfterQuery, and Annapurna had no criteria yet.
 - Free entries with no product code: Notability notes during the build, a .tech or GoDaddy domain, the SpaceXSI Cursor plus Grok Bot raffle, and the Commit Fellowship opt-in.
+
+## Implementation plan
+
+The base app is still unbuilt. Work proceeds one todo at a time. The cue engine stays deterministic. Sponsor add-ons wait until a cue can be encoded, shown, and sent.
+
+Run the protocol contract from the repo root:
+
+`python3 -m unittest shared.protocol.test_codec -v`
+
+`shared/protocol/test_codec.py` is the byte source of truth. The Python codec and the ESP32 codec both implement it. The ESP32 is the BLE peripheral.
+
+1. **Protocol oracle.** Done. [shared/protocol/codec.py](shared/protocol/codec.py) packs and unpacks both packets. The layout is copied in [shared/cue-protocol.md](shared/cue-protocol.md).
+2. **Firmware peripheral.** Done for the packet path. [firmware/src/protocol.c](firmware/src/protocol.c) matches the golden bytes. [firmware/src/main.cpp](firmware/src/main.cpp) advertises as `SmartHelmet`, accepts a cue write, notifies helmet state, and pulses GPIO 17 / 18 / 21. Heading stays invalid until the IMU is read. Host check: `clang -std=c11 -Wall -Wextra -I firmware/include firmware/src/protocol.c firmware/host/test_protocol.c -o /tmp/helmet-protocol && /tmp/helmet-protocol`.
+3. **Cue engine.** Done in Python. [shared/nav/geo.py](shared/nav/geo.py) and [shared/nav/engine.py](shared/nav/engine.py) pass `python3 -m unittest shared.nav.test_engine -v`. A `Cue` from this engine encodes to the same direction byte the ESP32 plays. Port the same decisions to `mobile/src/nav/` when the Expo app exists. Do not change them.
+
+4. **Routing.** Done in Python. [shared/routing/providers.py](shared/routing/providers.py) passes `python3 -m unittest shared.routing.test_routing -v`. Mapbox is used when a token is present. Otherwise OpenRouteService is used. A parsed left turn encodes to the ESP32 direction byte `1`. Port the same parsers to `mobile/src/routing/` when the Expo app exists.
+
+5. **Map screen.** Done in Python. [shared/ui/screen.py](shared/ui/screen.py) passes `python3 -m unittest shared.ui.test_screen -v`. `ScreenState` copies `Cue.direction` onto the motor diagram, splits the polyline at the rider, and labels the heading the cue engine used. It does not choose a turn. When the Expo app exists, bind the map, the card, and the status row to this state, and port the packet codec into `mobile/src/ble/protocol.ts`. Do not recompute the cue in the view.
+
+6. **Phone BLE.** Done in Python. [shared/ble/link.py](shared/ble/link.py) passes `python3 -m unittest shared.ble.test_link -v`. `HelmetLink` scans for `SmartHelmet`, writes the encoded cue without response, and turns helmet-state notifies into degrees. It does not choose a direction. When the Expo app exists, replace the fake radio with `react-native-ble-plx`.
+7. **Helmet actuators and heading.** Done on the host. [firmware/src/actuators.c](firmware/src/actuators.c) and [firmware/src/heading.c](firmware/src/heading.c) pass `clang -std=c11 -Wall -Wextra -Werror -I firmware/include firmware/src/actuators.c firmware/src/heading.c firmware/src/protocol.c firmware/host/test_helmet.c -lm -o /tmp/helmet-actuators && /tmp/helmet-actuators`. [firmware/src/main.cpp](firmware/src/main.cpp) plays that frame on the three motors and the two WS2812 strips. Heading notifies go through the same helper. The IMU chip is not read yet, so the sample is marked failed and the phone still receives the invalid heading. Do not flash until that read exists. Gyro smoothing is still out of this step.
+
+8. **README and install.** Done. [README.md](README.md) passes `python3 -m unittest shared.docs.test_readme -v`. The navigation bullet stays as written. The install section covers Expo Go, the Android APK, Xcode and TestFlight, the Mapbox token, and the firmware flash command.
 
 ## Out of scope for this pass
 

@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Smart Helmet",
+    "slug": "smart-helmet",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "edu.calhacks.smarthelmet",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "Smart Helmet connects to the helmet to send turn cues.",
+        "NSLocationWhenInUseUsageDescription": "Smart Helmet uses your location to choose the next turn."
+      }
+    },
+    "android": {
+      "package": "edu.calhacks.smarthelmet",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_SCAN"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "react-native-ble-plx",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Smart Helmet uses your location to choose the next turn."
+        }
+      ]
+    ]
+  }
+}
