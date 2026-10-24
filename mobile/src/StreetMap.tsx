@@ -1,6 +1,7 @@
 import { ComponentType, useEffect, useRef } from "react";
 import { StyleSheet } from "react-native";
 import { WebView } from "react-native-webview";
+import { VehicleKind } from "./icons";
 import { ScreenState } from "./screen";
 
 const MapWeb = WebView as unknown as ComponentType<Record<string, unknown>>;
@@ -30,7 +31,7 @@ const MAP_HTML = `<!DOCTYPE html>
     var TILE = 256;
     var zoom = 16;
     var center = { lat: 37.8703, lng: -122.2595 };
-    var ride = { traveled: [], remaining: [], puck: null, decision: null, follow: false, routeKey: "" };
+    var ride = { traveled: [], remaining: [], puck: null, decision: null, follow: false, routeKey: "", heading: null, vehicle: "bicycle" };
     var seenRoute = "";
     var userMoved = false;
     var tilesLoaded = 0;
@@ -119,17 +120,83 @@ const MAP_HTML = `<!DOCTYPE html>
       ctx.lineWidth = width;
       ctx.stroke();
     }
-    function dot(point, color, radius) {
+    function drawPin(point) {
       if (!point) return;
       var xy = screenPoint(point[0], point[1]);
+      ctx.save();
+      ctx.translate(xy[0], xy[1]);
       ctx.beginPath();
-      ctx.arc(xy[0], xy[1], radius, 0, Math.PI * 2);
+      ctx.moveTo(0, 12);
+      ctx.bezierCurveTo(-14, 2, -11, -16, 0, -16);
+      ctx.bezierCurveTo(11, -16, 14, 2, 0, 12);
+      ctx.closePath();
+      ctx.fillStyle = "#d23b3b";
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "#7d1515";
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, -6, 3.2, 0, Math.PI * 2);
       ctx.fillStyle = "#ffffff";
       ctx.fill();
+      ctx.restore();
+    }
+    function wheelAt(x, y, r) {
       ctx.beginPath();
-      ctx.arc(xy[0], xy[1], radius - 2, 0, Math.PI * 2);
-      ctx.fillStyle = color;
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffffff";
       ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#142033";
+      ctx.stroke();
+    }
+    function drawBicycleGlyph() {
+      wheelAt(-16, 6, 7.5);
+      wheelAt(16, 6, 7.5);
+      ctx.beginPath();
+      ctx.moveTo(-16, 6);
+      ctx.lineTo(0, 6);
+      ctx.lineTo(0, -10);
+      ctx.lineTo(-16, 6);
+      ctx.moveTo(0, -10);
+      ctx.lineTo(12, -8);
+      ctx.lineTo(16, 6);
+      ctx.moveTo(0, 6);
+      ctx.lineTo(12, -8);
+      ctx.moveTo(-6, -12);
+      ctx.lineTo(6, -12);
+      ctx.moveTo(10, -12);
+      ctx.lineTo(22, -12);
+      ctx.stroke();
+    }
+    function drawScooterGlyph() {
+      wheelAt(-14, 8, 6);
+      wheelAt(16, 8, 6);
+      ctx.beginPath();
+      ctx.moveTo(-14, 8);
+      ctx.lineTo(8, 8);
+      ctx.moveTo(-4, 4);
+      ctx.lineTo(8, 4);
+      ctx.moveTo(8, 8);
+      ctx.lineTo(14, -12);
+      ctx.lineTo(16, 8);
+      ctx.moveTo(10, -12);
+      ctx.lineTo(24, -12);
+      ctx.stroke();
+    }
+    function drawRider(point, heading, kind) {
+      if (!point) return;
+      var xy = screenPoint(point[0], point[1]);
+      ctx.save();
+      ctx.translate(xy[0], xy[1]);
+      ctx.rotate(((heading == null ? 90 : heading) - 90) * Math.PI / 180);
+      ctx.lineWidth = 2.4;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = "#142033";
+      if (kind === "scooter") drawScooterGlyph();
+      else drawBicycleGlyph();
+      ctx.restore();
     }
     function render() {
       var box = size();
@@ -143,8 +210,9 @@ const MAP_HTML = `<!DOCTYPE html>
       ctx.clearRect(0, 0, box.w, box.h);
       stroke(ride.traveled, "#8b93a7", 5);
       stroke(ride.remaining, "#2f6fed", 6);
-      dot(ride.decision, "#e2a322", 7);
-      dot(ride.puck, "#163a8a", 8);
+      var end = ride.remaining && ride.remaining.length ? ride.remaining[ride.remaining.length - 1] : null;
+      drawPin(ride.decision || end);
+      drawRider(ride.puck, ride.heading, ride.vehicle);
     }
     function fit(points) {
       var box = size();
@@ -234,18 +302,19 @@ const MAP_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
-export function StreetMap({ screen }: { screen: ScreenState }) {
+export function StreetMap({ screen, vehicle }: { screen: ScreenState; vehicle: VehicleKind }) {
   const webRef = useRef<WebView>(null);
-  const latest = useRef(screen);
-  latest.current = screen;
+  const latest = useRef({ screen, vehicle });
+  latest.current = { screen, vehicle };
 
-  function push(next: ScreenState): void {
+  function push(next: ScreenState, kind: VehicleKind): void {
     const payload = {
       traveled: next.traveled,
       remaining: next.remaining,
       puck: next.puck,
       decision: next.decisionMarker,
       heading: next.puckHeadingDeg,
+      vehicle: kind,
       follow: next.phase === "navigating" && next.puck != null,
       routeKey: next.destinationName,
     };
@@ -253,8 +322,8 @@ export function StreetMap({ screen }: { screen: ScreenState }) {
   }
 
   useEffect(() => {
-    push(screen);
-  }, [screen]);
+    push(screen, vehicle);
+  }, [screen, vehicle]);
 
   return (
     <MapWeb
@@ -267,7 +336,7 @@ export function StreetMap({ screen }: { screen: ScreenState }) {
       scrollEnabled={false}
       setSupportMultipleWindows={false}
       applicationNameForUserAgent="SmartHelmet/1.0"
-      onLoadEnd={() => push(latest.current)}
+      onLoadEnd={() => push(latest.current.screen, latest.current.vehicle)}
     />
   );
 }
