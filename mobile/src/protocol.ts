@@ -1,6 +1,7 @@
 export const PROTOCOL_VERSION = 1;
 export const CUE_PACKET_LEN = 8;
 export const HELMET_STATE_PACKET_LEN = 4;
+export const SENSOR_PACKET_LEN = 20;
 
 export const DIRECTION_NONE = 0;
 export const DIRECTION_LEFT = 1;
@@ -16,13 +17,18 @@ export const BUTTON_MODE = 1 << 0;
 export const BUTTON_SOS = 1 << 1;
 export const HEADING_INVALID = 0xffff;
 
+export const FLAG_IMU_OK = 1 << 0;
+export const FLAG_MIC_OK = 1 << 1;
+
 export const DEVICE_NAME = "SmartHelmet";
 export const SERVICE_UUID = "7c1a0001-5e2b-4a6d-8f10-9b3c4d5e6f70";
 export const CUE_CHARACTERISTIC_UUID = "7c1a0002-5e2b-4a6d-8f10-9b3c4d5e6f70";
 export const HELMET_STATE_CHARACTERISTIC_UUID = "7c1a0003-5e2b-4a6d-8f10-9b3c4d5e6f70";
+export const SENSOR_CHARACTERISTIC_UUID = "7c1a0004-5e2b-4a6d-8f10-9b3c4d5e6f70";
 
 const CUE_FLAG_MASK = FLAG_ARRIVED | FLAG_OFF_ROUTE | FLAG_REROUTING;
 const BUTTON_MASK = BUTTON_MODE | BUTTON_SOS;
+const SENSOR_FLAG_MASK = FLAG_IMU_OK | FLAG_MIC_OK;
 
 export type Cue = {
   direction: number;
@@ -38,10 +44,38 @@ export type HelmetState = {
   buttons: number;
 };
 
+export type SensorSample = {
+  imuOk: boolean;
+  micOk: boolean;
+  axMg: number;
+  ayMg: number;
+  azMg: number;
+  gxDps10: number;
+  gyDps10: number;
+  gzDps10: number;
+  micPeak: number;
+};
+
 function uint(name: string, value: number, high: number): void {
   if (!Number.isInteger(value) || value < 0 || value > high) {
     throw new Error(`${name} out of range`);
   }
+}
+
+function int16(name: string, value: number): void {
+  if (!Number.isInteger(value) || value < -32768 || value > 32767) {
+    throw new Error(`${name} out of range`);
+  }
+}
+
+function putI16(out: number[], value: number): void {
+  const raw = value & 0xffff;
+  out.push(raw & 0xff, (raw >> 8) & 0xff);
+}
+
+function getI16(packet: Uint8Array, offset: number): number {
+  const raw = packet[offset] | (packet[offset + 1] << 8);
+  return raw >= 32768 ? raw - 65536 : raw;
 }
 
 export function encodeCue(cue: Cue): Uint8Array {
@@ -108,6 +142,45 @@ export function decodeHelmetState(packet: Uint8Array): HelmetState {
     throw new Error("invalid heading must use the 0xFFFF sentinel");
   }
   return { headingDecidegrees: heading, headingValid, buttons };
+}
+
+export function encodeSensorSample(sample: SensorSample): Uint8Array {
+  int16("axMg", sample.axMg);
+  int16("ayMg", sample.ayMg);
+  int16("azMg", sample.azMg);
+  int16("gxDps10", sample.gxDps10);
+  int16("gyDps10", sample.gyDps10);
+  int16("gzDps10", sample.gzDps10);
+  int16("micPeak", sample.micPeak);
+  const flags = (sample.imuOk ? FLAG_IMU_OK : 0) | (sample.micOk ? FLAG_MIC_OK : 0);
+  const out: number[] = [PROTOCOL_VERSION, flags];
+  putI16(out, sample.axMg);
+  putI16(out, sample.ayMg);
+  putI16(out, sample.azMg);
+  putI16(out, sample.gxDps10);
+  putI16(out, sample.gyDps10);
+  putI16(out, sample.gzDps10);
+  putI16(out, sample.micPeak);
+  out.push(0, 0, 0, 0);
+  return Uint8Array.from(out);
+}
+
+export function decodeSensorSample(packet: Uint8Array): SensorSample {
+  if (packet.length !== SENSOR_PACKET_LEN) throw new Error("sensor packet must be 20 bytes");
+  if (packet[0] !== PROTOCOL_VERSION) throw new Error("unsupported sensor version");
+  const flags = packet[1];
+  if (flags & ~SENSOR_FLAG_MASK) throw new Error("unknown sensor flags");
+  return {
+    imuOk: Boolean(flags & FLAG_IMU_OK),
+    micOk: Boolean(flags & FLAG_MIC_OK),
+    axMg: getI16(packet, 2),
+    ayMg: getI16(packet, 4),
+    azMg: getI16(packet, 6),
+    gxDps10: getI16(packet, 8),
+    gyDps10: getI16(packet, 10),
+    gzDps10: getI16(packet, 12),
+    micPeak: getI16(packet, 14),
+  };
 }
 
 export function sameBytes(left: Uint8Array | null, right: Uint8Array): boolean {

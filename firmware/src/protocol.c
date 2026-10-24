@@ -85,3 +85,60 @@ int decode_helmet_state(const uint8_t *packet, size_t length, HelmetState *out) 
     out->buttons = packet[3];
     return 0;
 }
+
+static void put_i16(uint8_t *out, int16_t value) {
+    uint16_t raw = (uint16_t)value;
+    out[0] = (uint8_t)(raw & 0xFFu);
+    out[1] = (uint8_t)((raw >> 8) & 0xFFu);
+}
+
+static int16_t get_i16(const uint8_t *packet) {
+    return (int16_t)(uint16_t)(packet[0] | ((uint16_t)packet[1] << 8));
+}
+
+int encode_sensor_sample(const SensorSample *sample, uint8_t out[SENSOR_PACKET_LEN]) {
+    uint8_t flags;
+    if (reject_null(sample) || reject_null(out)) {
+        return -1;
+    }
+    flags = 0;
+    if (sample->imu_ok) {
+        flags |= FLAG_IMU_OK;
+    }
+    if (sample->mic_ok) {
+        flags |= FLAG_MIC_OK;
+    }
+    out[0] = PROTOCOL_VERSION;
+    out[1] = flags;
+    put_i16(out + 2, sample->ax_mg);
+    put_i16(out + 4, sample->ay_mg);
+    put_i16(out + 6, sample->az_mg);
+    put_i16(out + 8, sample->gx_dps10);
+    put_i16(out + 10, sample->gy_dps10);
+    put_i16(out + 12, sample->gz_dps10);
+    put_i16(out + 14, sample->mic_peak);
+    out[16] = 0;
+    out[17] = 0;
+    out[18] = 0;
+    out[19] = 0;
+    return 0;
+}
+
+int decode_sensor_sample(const uint8_t *packet, size_t length, SensorSample *out) {
+    if (reject_null(packet) || reject_null(out) || length != SENSOR_PACKET_LEN) {
+        return -1;
+    }
+    if (packet[0] != PROTOCOL_VERSION || (packet[1] & ~(FLAG_IMU_OK | FLAG_MIC_OK)) != 0) {
+        return -1;
+    }
+    out->imu_ok = (packet[1] & FLAG_IMU_OK) != 0;
+    out->mic_ok = (packet[1] & FLAG_MIC_OK) != 0;
+    out->ax_mg = get_i16(packet + 2);
+    out->ay_mg = get_i16(packet + 4);
+    out->az_mg = get_i16(packet + 6);
+    out->gx_dps10 = get_i16(packet + 8);
+    out->gy_dps10 = get_i16(packet + 10);
+    out->gz_dps10 = get_i16(packet + 12);
+    out->mic_peak = get_i16(packet + 14);
+    return 0;
+}

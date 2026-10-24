@@ -5,9 +5,10 @@ import { gpsStatus, readingFromCoords } from "./gps";
 import { destinationPoint, nearestPlaces, osmBikeRouteRequest, placeChoices, routeFromOsrm } from "./routing";
 import { planTiles, mercatorTile } from "./tiles";
 import { CueEngine, fixAlong } from "./engine";
+import { debugStopCue, debugTurnCue, micLevel } from "./debug";
 import { advertisementFromScan, HelmetLink } from "./link";
 import { helmetScanPermissions } from "./scanPermissions";
-import { DIRECTION_LEFT, encodeCue, SERVICE_UUID } from "./protocol";
+import { DIRECTION_LEFT, DIRECTION_RIGHT, encodeCue, encodeSensorSample, SENSOR_CHARACTERISTIC_UUID, SERVICE_UUID } from "./protocol";
 import { NavSession } from "./screen";
 import { VoiceAgent } from "./voiceAgent";
 import {
@@ -25,6 +26,28 @@ import {
 } from "./voice";
 
 describe("phone navigator", () => {
+  it("encodes a sensor sample the debug page can read", () => {
+    const bytes = encodeSensorSample({
+      imuOk: true,
+      micOk: true,
+      axMg: 1000,
+      ayMg: -250,
+      azMg: 980,
+      gxDps10: 15,
+      gyDps10: 0,
+      gzDps10: -20,
+      micPeak: 12000,
+    });
+    assert.deepEqual(
+      [...bytes],
+      [0x01, 0x03, 0xe8, 0x03, 0x06, 0xff, 0xd4, 0x03, 0x0f, 0x00, 0x00, 0x00, 0xec, 0xff, 0xe0, 0x2e, 0x00, 0x00, 0x00, 0x00],
+    );
+    assert.equal(debugTurnCue(DIRECTION_LEFT).direction, DIRECTION_LEFT);
+    assert.equal(debugTurnCue(DIRECTION_RIGHT).intensity, 160);
+    assert.equal(debugStopCue().direction, 0);
+    assert.equal(micLevel(16384) > 0.4 && micLevel(16384) < 0.6, true);
+  });
+
   it("encodes a left cue the helmet can play", () => {
     const bytes = encodeCue({ direction: DIRECTION_LEFT, intensity: 180, pulsePeriodMs: 800, distanceM: 40, flags: 0 });
     assert.deepEqual([...bytes], [0x01, 0x01, 0xb4, 0x20, 0x03, 0x28, 0x00, 0x00]);
@@ -90,6 +113,40 @@ describe("phone navigator", () => {
     await link.send(cue, 0.2);
     assert.equal(writes.length, 1);
     assert.deepEqual([...writes[0]], [...encodeCue(cue)]);
+  });
+
+  it("keeps the latest helmet sensor notify", async () => {
+    const sample = encodeSensorSample({
+      imuOk: true,
+      micOk: true,
+      axMg: 1000,
+      ayMg: -250,
+      azMg: 980,
+      gxDps10: 15,
+      gyDps10: 0,
+      gzDps10: -20,
+      micPeak: 12000,
+    });
+    let packets = [sample];
+    const link = new HelmetLink({
+      async scan() {
+        return [{ name: "SmartHelmet", address: "bb" }];
+      },
+      async connect() {},
+      async disconnect() {},
+      async subscribe() {},
+      async writeWithoutResponse() {},
+      async takeNotifications(uuid) {
+        if (uuid !== SENSOR_CHARACTERISTIC_UUID) return [];
+        const ready = packets;
+        packets = [];
+        return ready;
+      },
+    });
+    await link.connect({ name: "SmartHelmet", address: "bb" });
+    await link.poll(0);
+    assert.equal(link.sensors?.axMg, 1000);
+    assert.equal(link.sensors?.micPeak, 12000);
   });
 
   it("shows a live GPS fix and explains a missing one", () => {

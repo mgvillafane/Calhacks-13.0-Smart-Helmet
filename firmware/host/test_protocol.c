@@ -94,12 +94,37 @@ static void test_helmet_state_rejects(void) {
            "reject valid sentinel");
 }
 
+static void test_sensor_sample_golden_packet(void) {
+    SensorSample sample = {true, true, 1000, -250, 980, 15, 0, -20, 12000};
+    uint8_t packet[SENSOR_PACKET_LEN];
+    const uint8_t expected[] = {
+        0x01, 0x03, 0xE8, 0x03, 0x06, 0xFF, 0xD4, 0x03, 0x0F, 0x00,
+        0x00, 0x00, 0xEC, 0xFF, 0xE0, 0x2E, 0x00, 0x00, 0x00, 0x00,
+    };
+    SensorSample decoded;
+    uint8_t unknown_flag[] = {
+        0x01, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+
+    expect(encode_sensor_sample(&sample, packet) == 0, "encode sensor sample");
+    expect_bytes(packet, expected, SENSOR_PACKET_LEN, "sensor bytes");
+    expect(decode_sensor_sample(packet, SENSOR_PACKET_LEN, &decoded) == 0, "decode sensor");
+    expect(decoded.imu_ok && decoded.mic_ok, "sensor flags");
+    expect(decoded.ax_mg == 1000 && decoded.ay_mg == -250 && decoded.az_mg == 980, "accel");
+    expect(decoded.gx_dps10 == 15 && decoded.gy_dps10 == 0 && decoded.gz_dps10 == -20, "gyro");
+    expect(decoded.mic_peak == 12000, "mic peak");
+    expect(decode_sensor_sample(unknown_flag, SENSOR_PACKET_LEN, &decoded) == -1, "reject sensor flag");
+    expect(decode_sensor_sample(packet, 19, &decoded) == -1, "reject short sensor");
+}
+
 int main(void) {
     test_left_cue_little_endian();
     test_front_and_uturn_golden_packets();
     test_cue_rejects();
     test_helmet_state_golden_packets();
     test_helmet_state_rejects();
+    test_sensor_sample_golden_packet();
     if (failures != 0) {
         fprintf(stderr, "%d firmware protocol check(s) failed\n", failures);
         return 1;

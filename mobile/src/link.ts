@@ -5,7 +5,10 @@ import {
   DIRECTION_NONE,
   SERVICE_UUID,
   HELMET_STATE_CHARACTERISTIC_UUID,
+  SENSOR_CHARACTERISTIC_UUID,
+  SensorSample,
   decodeHelmetState,
+  decodeSensorSample,
   encodeCue,
   sameBytes,
 } from "./protocol";
@@ -41,6 +44,7 @@ export class HelmetLink {
   headingDeg: number | null = null;
   headingAgeS: number | null = null;
   buttons = 0;
+  sensors: SensorSample | null = null;
   private headingAtS: number | null = null;
   private lastPayload: Uint8Array | null = null;
   private lastSentS: number | null = null;
@@ -58,6 +62,11 @@ export class HelmetLink {
     if (advertisement.name !== DEVICE_NAME) throw new Error(`expected ${DEVICE_NAME}`);
     await this.radio.connect(advertisement.address);
     await this.radio.subscribe(HELMET_STATE_CHARACTERISTIC_UUID);
+    try {
+      await this.radio.subscribe(SENSOR_CHARACTERISTIC_UUID);
+    } catch {
+      this.sensors = null;
+    }
     this.connected = true;
   }
 
@@ -68,6 +77,7 @@ export class HelmetLink {
     this.headingAgeS = null;
     this.headingAtS = null;
     this.buttons = 0;
+    this.sensors = null;
     this.lastPayload = null;
     this.lastSentS = null;
   }
@@ -97,6 +107,13 @@ export class HelmetLink {
           this.headingAgeS = null;
           this.headingAtS = null;
         }
+      } catch {
+        continue;
+      }
+    }
+    for (const packet of await this.radio.takeNotifications(SENSOR_CHARACTERISTIC_UUID)) {
+      try {
+        this.sensors = decodeSensorSample(packet);
       } catch {
         continue;
       }

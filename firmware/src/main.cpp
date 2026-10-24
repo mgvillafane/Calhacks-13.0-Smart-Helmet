@@ -15,12 +15,14 @@
 #include "pins.h"
 #include "protocol.h"
 
+#include <math.h>
 #include <string.h>
 
 static const int kMotorPwmChannelLeft = 0;
 static const int kMotorPwmChannelFront = 1;
 static const int kMotorPwmChannelRight = 2;
 static const int kNotifyPeriodMs = 200;
+static const int kSensorPeriodMs = 100;
 static const int kImuPeriodMs = 20;
 static const uint8_t kMpuPwrMgmt1 = 0x6B;
 static const uint8_t kMpuAccelOut = 0x3B;
@@ -90,6 +92,9 @@ static bool startMpu(void) {
 }
 
 static BLECharacteristic *helmetStateCharacteristic = nullptr;
+static BLECharacteristic *sensorCharacteristic = nullptr;
+static SensorSample latestSensors = {};
+static int32_t micPeak = 0;
 static Cue activeCue = {DIRECTION_NONE, 0, 0, 0, 0};
 static uint32_t cueReceivedMs = 0;
 static bool cueFresh = false;
@@ -176,6 +181,47 @@ static void applyCue(uint32_t now) {
     digitalWrite(PIN_LED_LEFT, leftTurnLevel(now) ? HIGH : LOW);
     showStrip(&rightStrip, frame.led_right, lastRightLeds);
     ledCacheReady = true;
+}
+
+static int16_t clampI16(int value) {
+    if (value > 32767) {
+        return 32767;
+    }
+    if (value < -32768) {
+        return -32768;
+    }
+    return (int16_t)value;
+}
+
+static void rememberImu(float ax, float ay, float az, float gx, float gy, float gz) {
+    latestSensors.imu_ok = true;
+    latestSensors.ax_mg = clampI16((int)lroundf(ax * 1000.0f));
+    latestSensors.ay_mg = clampI16((int)lroundf(ay * 1000.0f));
+    latestSensors.az_mg = clampI16((int)lroundf(az * 1000.0f));
+    latestSensors.gx_dps10 = clampI16((int)lroundf(gx * 10.0f));
+    latestSensors.gy_dps10 = clampI16((int)lroundf(gy * 10.0f));
+    latestSensors.gz_dps10 = clampI16((int)lroundf(gz * 10.0f));
+}
+
+static void rememberMic(int32_t sample) {
+    int32_t peak = sample < 0 ? -sample : sample;
+    latestSensors.mic_ok = true;
+    if (peak > micPeak) {
+        micPeak = peak;
+    }
+}
+
+static void notifySensors(void) {
+    uint8_t packet[SENSOR_PACKET_LEN];
+    latestSensors.mic_peak = clampI16((int)(micPeak >> 8));
+    micPeak = 0;
+    if (encode_sensor_sample(&latestSensors, packet) != 0 || sensorCharacteristic == nullptr) {
+        return;
+    }
+    sensorCharacteristic->setValue(packet, SENSOR_PACKET_LEN);
+    if (clientConnected) {
+        sensorCharacteristic->notify();
+    }
 }
 
 static void notifyHelmetState(void) {
@@ -267,6 +313,12 @@ void setup(void) {
     );
     helmetStateCharacteristic->addDescriptor(new BLE2902());
 
+    sensorCharacteristic = service->createCharacteristic(
+        SENSOR_CHARACTERISTIC_UUID,
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+    );
+    sensorCharacteristic->addDescriptor(new BLE2902());
+
     service->start();
     BLEAdvertising *advertising = BLEDevice::getAdvertising();
     advertising->addServiceUUID(SERVICE_UUID);
@@ -277,6 +329,7 @@ void setup(void) {
 
 void loop(void) {
     static uint32_t lastNotifyMs = 0;
+    static uint32_t lastSensorMs = 0;
     static uint32_t lastImuMs = 0;
     static uint32_t lastMicMs = 0;
     static BrakeState brakeState = {};
@@ -286,6 +339,7 @@ void loop(void) {
     if (micReady && now - lastMicMs >= kImuPeriodMs) {
         int32_t sample = 0;
         if (readMicrophone(&sample)) {
+            rememberMic(sample);
             Serial.printf("mic,%lu,%ld\n", now, (long)sample);
         }
         lastMicMs = now;
@@ -298,12 +352,17 @@ void loop(void) {
         float gy;
         float gz;
         if (mpuRead(&ax, &ay, &az, &gx, &gy, &gz)) {
+            rememberImu(ax, ay, az, gx, gy, gz);
             Serial.printf("imu,%lu,%.4f,%.4f,%.4f,%.2f,%.2f,%.2f\n", now, ax, ay, az, gx, gy, gz);
             braking = brake_update(&brakeState, ax, ay, az, gy, now - lastImuMs) == 1;
         }
         lastImuMs = now;
     }
     sendBlinker(now, braking);
+    if (now - lastSensorMs >= kSensorPeriodMs) {
+        notifySensors();
+        lastSensorMs = now;
+    }
     if (now - lastNotifyMs >= kNotifyPeriodMs) {
         notifyHelmetState();
         lastNotifyMs = now;

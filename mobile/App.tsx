@@ -4,6 +4,8 @@ import { initialWindowMetrics, SafeAreaProvider, useSafeAreaInsets } from "react
 import { requestRecordingPermissionsAsync, useAudioStream } from "expo-audio";
 import { StatusBar } from "expo-status-bar";
 import * as Location from "expo-location";
+import { DebugScreen } from "./src/DebugScreen";
+import { debugStopCue, debugTurnCue } from "./src/debug";
 import { demoLeftTurn } from "./src/demo";
 import { distanceM, LatLng } from "./src/geo";
 import { CueEngine, Fix, Route, fixAlong } from "./src/engine";
@@ -14,12 +16,13 @@ import { createPhoneRadio } from "./src/radio";
 import { PlaceChoice, routeBetween, searchPlaces } from "./src/routing";
 import { NavSession, ScreenState, idleScreen } from "./src/screen";
 import { StreetMap } from "./src/StreetMap";
+import { Cue, DIRECTION_LEFT, DIRECTION_RIGHT, SensorSample } from "./src/protocol";
 import { VoiceCommand, VOICE_SAMPLE_RATE, prepareMicPcm, voiceKeyConfigured, whatsNextResult } from "./src/voice";
 import { VoiceAgent } from "./src/voiceAgent";
 import { connectGrokVoice, prepareVoiceAudio } from "./src/voiceLive";
 
 const DEMO_SPEED_MPS = 8;
-type Page = "search" | "ride" | "settings";
+type Page = "search" | "ride" | "settings" | "debug";
 
 export default function App() {
   return (
@@ -63,6 +66,9 @@ function HelmetScreen() {
   const executeRef = useRef<(command: VoiceCommand) => Promise<string>>(async () => "{}");
   const [listening, setListening] = useState(false);
   const [voiceNote, setVoiceNote] = useState("");
+  const debugHoldRef = useRef<"left" | "right" | null>(null);
+  const [debugHold, setDebugHold] = useState<"left" | "right" | null>(null);
+  const [sensors, setSensors] = useState<SensorSample | null>(null);
   const { stream } = useAudioStream({
     sampleRate: VOICE_SAMPLE_RATE,
     channels: 1,
@@ -166,6 +172,29 @@ function HelmetScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!debugHold) return undefined;
+    const timer = setInterval(() => {
+      const side = debugHoldRef.current;
+      if (!side) return;
+      void sendDebugCue(debugTurnCue(side === "left" ? DIRECTION_LEFT : DIRECTION_RIGHT));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [debugHold]);
+
+  useEffect(() => {
+    if (page !== "debug") return undefined;
+    const timer = setInterval(() => {
+      const link = linkRef.current;
+      if (!link?.connected) {
+        setSensors(null);
+        return;
+      }
+      void link.poll(Date.now() / 1000).then(() => setSensors(link.sensors));
+    }, 100);
+    return () => clearInterval(timer);
+  }, [page]);
+
   async function loadPlaces(query: string, alreadyCancelled: boolean, isCancelled: () => boolean): Promise<void> {
     if (alreadyCancelled) return;
     setSearching(true);
@@ -222,7 +251,7 @@ function HelmetScreen() {
       if (step > 0.4 && step < 80) setRiddenM((meters) => meters + step);
     }
     setScreen(sessionRef.current.update(fix, decision, Boolean(link?.connected), link?.headingAgeS ?? null));
-    if (link?.connected) await link.send(decision.cue, now);
+    if (link?.connected && !debugHoldRef.current) await link.send(decision.cue, now);
   }
 
   function useRoute(route: Route, provider: string, name: string): void {
@@ -454,6 +483,37 @@ function HelmetScreen() {
     setPage(returnPage.current === "settings" ? "search" : returnPage.current);
   }
 
+  async function sendDebugCue(cue: Cue): Promise<void> {
+    const link = linkRef.current;
+    if (!link?.connected) {
+      setBleMessage("Connect the helmet before sending a turn.");
+      return;
+    }
+    await link.send(cue, Date.now() / 1000);
+  }
+
+  function holdDebug(side: "left" | "right"): void {
+    debugHoldRef.current = side;
+    setDebugHold(side);
+    void sendDebugCue(debugTurnCue(side === "left" ? DIRECTION_LEFT : DIRECTION_RIGHT));
+  }
+
+  function stopDebugCue(): void {
+    debugHoldRef.current = null;
+    setDebugHold(null);
+    void sendDebugCue(debugStopCue());
+  }
+
+  function openDebug(): void {
+    if (page !== "debug") returnPage.current = page;
+    setPage("debug");
+  }
+
+  function closeDebug(): void {
+    stopDebugCue();
+    setPage(returnPage.current === "debug" ? "search" : returnPage.current);
+  }
+
   executeRef.current = runVoiceCommand;
 
   const typing = keyboardHeight > 0 || choices.length > 0 || searching;
@@ -467,7 +527,21 @@ function HelmetScreen() {
   return (
     <View style={styles.screen}>
       <View style={[styles.page, { paddingTop: insets.top + 10, paddingBottom: 12 + bottomInset }]}>
-        {page === "settings" ? (
+        {page === "debug" ? (
+          <DebugScreen
+            gps={gpsRef.current}
+            gpsMessage={gpsMessage}
+            bleMessage={bleMessage}
+            connected={screen.bleConnected}
+            sensors={sensors}
+            holding={debugHold}
+            onBack={closeDebug}
+            onConnect={() => void connectHelmet()}
+            onLeft={() => holdDebug("left")}
+            onRight={() => holdDebug("right")}
+            onStop={stopDebugCue}
+          />
+        ) : page === "settings" ? (
           <ScrollView contentContainerStyle={styles.settings} keyboardShouldPersistTaps="handled">
             <View style={styles.settingsHead}>
               <Pressable style={styles.roundButton} onPress={closeSettings} accessibilityLabel="Back">
@@ -520,6 +594,9 @@ function HelmetScreen() {
               <Pressable style={styles.ghostPill} onPress={() => (playing ? setPlaying(false) : playDemo())}>
                 <Text style={styles.ghostText}>{playing ? "Pause demo" : "Play demo"}</Text>
               </Pressable>
+              <Pressable style={styles.ghostPill} onPress={openDebug}>
+                <Text style={styles.ghostText}>Debug</Text>
+              </Pressable>
             </View>
           </ScrollView>
         ) : (
@@ -543,6 +620,9 @@ function HelmetScreen() {
                     <Text style={styles.connectText}>Connect helmet</Text>
                   </Pressable>
                   <HelmetTile size={40} />
+                  <Pressable style={styles.roundButton} onPress={openDebug} accessibilityLabel="Debug">
+                    <Text style={styles.debugMark}>D</Text>
+                  </Pressable>
                   <Pressable style={styles.roundButton} onPress={openSettings} accessibilityLabel="Settings">
                     <GearIcon size={22} />
                   </Pressable>
@@ -745,4 +825,5 @@ const styles = StyleSheet.create({
   note: { flex: 1, color: TEXT, fontSize: 14, lineHeight: 19 },
   ghostPill: { flex: 1, borderRadius: 16, minHeight: 48, alignItems: "center", justifyContent: "center", backgroundColor: SURFACE },
   ghostText: { color: TEXT, fontWeight: "700" },
+  debugMark: { color: TEXT, fontWeight: "800", fontSize: 18 },
 });

@@ -18,19 +18,26 @@ from shared.protocol.codec import (
     DIRECTION_RIGHT,
     DIRECTION_UTURN,
     FLAG_ARRIVED,
+    FLAG_IMU_OK,
+    FLAG_MIC_OK,
     FLAG_OFF_ROUTE,
     FLAG_REROUTING,
     HEADING_INVALID,
     HELMET_STATE_CHARACTERISTIC_UUID,
     HELMET_STATE_PACKET_LEN,
     PROTOCOL_VERSION,
+    SENSOR_CHARACTERISTIC_UUID,
+    SENSOR_PACKET_LEN,
     SERVICE_UUID,
     Cue,
     HelmetState,
+    SensorSample,
     decode_cue,
     decode_helmet_state,
+    decode_sensor_sample,
     encode_cue,
     encode_helmet_state,
+    encode_sensor_sample,
 )
 
 
@@ -55,11 +62,13 @@ class IdentityTest(unittest.TestCase):
             HELMET_STATE_CHARACTERISTIC_UUID,
             "7c1a0003-5e2b-4a6d-8f10-9b3c4d5e6f70",
         )
+        self.assertEqual(SENSOR_CHARACTERISTIC_UUID, "7c1a0004-5e2b-4a6d-8f10-9b3c4d5e6f70")
 
     def test_packet_lengths_and_version(self):
         self.assertEqual(PROTOCOL_VERSION, 1)
         self.assertEqual(CUE_PACKET_LEN, 8)
         self.assertEqual(HELMET_STATE_PACKET_LEN, 4)
+        self.assertEqual(SENSOR_PACKET_LEN, 20)
 
     def test_direction_and_flag_values(self):
         self.assertEqual(
@@ -72,6 +81,8 @@ class IdentityTest(unittest.TestCase):
         self.assertEqual(BUTTON_MODE, 0x01)
         self.assertEqual(BUTTON_SOS, 0x02)
         self.assertEqual(HEADING_INVALID, 0xFFFF)
+        self.assertEqual(FLAG_IMU_OK, 0x01)
+        self.assertEqual(FLAG_MIC_OK, 0x02)
 
 
 class CueEncodeTest(unittest.TestCase):
@@ -301,6 +312,70 @@ class HelmetStateEncodeRejectTest(unittest.TestCase):
             encode_helmet_state(
                 HelmetState(heading_decidegrees=0, heading_valid=True, buttons=0x04)
             )
+
+
+class SensorSampleEncodeTest(unittest.TestCase):
+    def test_known_sample_is_twenty_little_endian_bytes(self):
+        packet = encode_sensor_sample(
+            SensorSample(
+                imu_ok=True,
+                mic_ok=True,
+                ax_mg=1000,
+                ay_mg=-250,
+                az_mg=980,
+                gx_dps10=15,
+                gy_dps10=0,
+                gz_dps10=-20,
+                mic_peak=12000,
+            )
+        )
+        self.assertEqual(
+            packet,
+            bytes(
+                [
+                    0x01,
+                    0x03,
+                    0xE8,
+                    0x03,
+                    0x06,
+                    0xFF,
+                    0xD4,
+                    0x03,
+                    0x0F,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0xEC,
+                    0xFF,
+                    0xE0,
+                    0x2E,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                ]
+            ),
+        )
+
+    def test_missing_sensors_clear_the_ok_bits(self):
+        packet = encode_sensor_sample(
+            SensorSample(False, False, 0, 0, 0, 0, 0, 0, 0)
+        )
+        self.assertEqual(packet[0], 0x01)
+        self.assertEqual(packet[1], 0x00)
+        self.assertEqual(len(packet), SENSOR_PACKET_LEN)
+
+
+class SensorSampleDecodeTest(unittest.TestCase):
+    def test_round_trip(self):
+        original = SensorSample(True, True, 1000, -250, 980, 15, 0, -20, 12000)
+        self.assertEqual(decode_sensor_sample(encode_sensor_sample(original)), original)
+
+    def test_rejects_bad_length_version_and_flags(self):
+        good = encode_sensor_sample(SensorSample(True, False, 1, 0, 0, 0, 0, 0, 0))
+        for packet in (b"", good[:19], good + b"\x00", bytes([0x02]) + good[1:], bytes([0x01, 0x04]) + good[2:]):
+            with self.assertRaises(ValueError):
+                decode_sensor_sample(packet)
 
 
 if __name__ == "__main__":

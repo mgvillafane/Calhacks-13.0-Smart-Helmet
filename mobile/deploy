@@ -44,7 +44,7 @@ apk="android/app/build/outputs/apk/debug/app-debug.apk"
 adb -s "$serial" install -r -d --no-streaming "$apk"
 adb -s "$serial" reverse tcp:8081 tcp:8081
 
-echo "Installed on ${serial}. Starting the dev server. Open Smart Helmet on the phone."
+echo "Installed on ${serial}. Starting the dev server and opening Smart Helmet."
 # The phone reaches Metro through the adb reverse above. A LAN address is a WSL
 # address the handset cannot route to, which leaves the app on a black screen.
-exec npx expo start --dev-client --localhost --port 8081
+exec npx expo start --dev-client --localhost --android --port 8081

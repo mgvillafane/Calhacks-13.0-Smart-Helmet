@@ -1,6 +1,6 @@
 import { Permission, PermissionsAndroid, Platform } from "react-native";
 import { Advertisement, advertisementFromScan, Radio } from "./link";
-import { HELMET_STATE_CHARACTERISTIC_UUID, SERVICE_UUID } from "./protocol";
+import { SERVICE_UUID } from "./protocol";
 import { helmetScanPermissions } from "./scanPermissions";
 
 type Subscription = { remove: () => void };
@@ -44,8 +44,8 @@ export async function createPhoneRadio(): Promise<Radio> {
   }
   const manager = new BleManager();
   let device: Device | null = null;
-  let subscription: Subscription | null = null;
-  let notes: Uint8Array[] = [];
+  const subscriptions = new Map<string, Subscription>();
+  const notes = new Map<string, Uint8Array[]>();
 
   return {
     scan: () =>
@@ -79,9 +79,9 @@ export async function createPhoneRadio(): Promise<Radio> {
       device = await device.discoverAllServicesAndCharacteristics();
     },
     async disconnect() {
-      subscription?.remove();
-      subscription = null;
-      notes = [];
+      for (const subscription of subscriptions.values()) subscription.remove();
+      subscriptions.clear();
+      notes.clear();
       if (device) await device.cancelConnection();
       device = null;
     },
@@ -91,16 +91,21 @@ export async function createPhoneRadio(): Promise<Radio> {
     },
     async subscribe(characteristicUuid: string) {
       if (!device) throw new Error("helmet is not connected");
-      subscription?.remove();
-      subscription = device.monitorCharacteristicForService(SERVICE_UUID, characteristicUuid, (error, characteristic) => {
-        if (error || !characteristic?.value || characteristicUuid !== HELMET_STATE_CHARACTERISTIC_UUID) return;
-        notes.push(base64ToBytes(characteristic.value));
-      });
+      subscriptions.get(characteristicUuid)?.remove();
+      if (!notes.has(characteristicUuid)) notes.set(characteristicUuid, []);
+      subscriptions.set(
+        characteristicUuid,
+        device.monitorCharacteristicForService(SERVICE_UUID, characteristicUuid, (error, characteristic) => {
+          if (error || !characteristic?.value) return;
+          const bucket = notes.get(characteristicUuid) ?? [];
+          bucket.push(base64ToBytes(characteristic.value));
+          notes.set(characteristicUuid, bucket);
+        }),
+      );
     },
     async takeNotifications(characteristicUuid: string) {
-      if (characteristicUuid !== HELMET_STATE_CHARACTERISTIC_UUID) return [];
-      const ready = notes;
-      notes = [];
+      const ready = notes.get(characteristicUuid) ?? [];
+      notes.set(characteristicUuid, []);
       return ready;
     },
     destroy: () => manager.destroy(),
