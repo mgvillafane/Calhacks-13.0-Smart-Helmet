@@ -274,6 +274,14 @@ const MAP_HTML = `<!DOCTYPE html>
       render();
     }
     window.showRide = showRide;
+    window.focusUser = function () {
+      userMoved = false;
+      var point = ride.user || ride.puck;
+      if (!point) return;
+      center = { lat: point[0], lng: point[1] };
+      zoom = 16;
+      render();
+    };
 
     var touches = {};
     var pinch = 0;
@@ -326,9 +334,10 @@ const MAP_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
-export function StreetMap({ screen, vehicle, user }: { screen: ScreenState; vehicle: VehicleKind; user: [number, number] | null }) {
+export function StreetMap({ screen, vehicle, user, focusNonce = 0 }: { screen: ScreenState; vehicle: VehicleKind; user: [number, number] | null; focusNonce?: number }) {
   const webRef = useRef<WebView>(null);
   const latest = useRef({ screen, vehicle, user });
+  const seenFocus = useRef(focusNonce);
   latest.current = { screen, vehicle, user };
 
   function push(next: ScreenState, kind: VehicleKind, point: [number, number] | null): void {
@@ -349,6 +358,12 @@ export function StreetMap({ screen, vehicle, user }: { screen: ScreenState; vehi
   useEffect(() => {
     push(screen, vehicle, user);
   }, [screen, vehicle, user]);
+
+  useEffect(() => {
+    if (seenFocus.current === focusNonce) return;
+    seenFocus.current = focusNonce;
+    webRef.current?.injectJavaScript("window.focusUser && window.focusUser(); true;");
+  }, [focusNonce]);
 
   return (
     <MapWeb

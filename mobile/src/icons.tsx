@@ -1,4 +1,4 @@
-import { Animated, View } from "react-native";
+import { Animated, Image, View } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
 
 export type VehicleKind = "bicycle" | "scooter";
@@ -69,10 +69,10 @@ export function ChevronLeftIcon({ size = 22, color = PAPER }: { size?: number; c
   );
 }
 
-export function CueArrow({ direction, color }: { direction: "left" | "up" | "right"; color: string }) {
+export function CueArrow({ direction, color, size = 22 }: { direction: "left" | "up" | "right"; color: string; size?: number }) {
   const d = direction === "left" ? "M15 5 L7 12 L15 19" : direction === "right" ? "M9 5 L17 12 L9 19" : "M5 15 L12 7 L19 15";
   return (
-    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d={d} stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
@@ -103,6 +103,76 @@ export function RiderBadge({ kind, size = 64 }: { kind: VehicleKind; size?: numb
     <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: PAPER, borderWidth: Math.max(3, size * 0.06), borderColor: BLUE, alignItems: "center", justifyContent: "center" }}>
       <MiniVehicle kind={kind} size={size * 0.58} color="#1E1245" />
     </View>
+  );
+}
+
+export function HelmetArt({ width = 36, tone = "dark" }: { width?: number; tone?: "dark" | "light" }) {
+  const height = Math.round(width * (558 / 751));
+  return (
+    <Image
+      source={tone === "dark" ? require("../assets/helmet-dark.png") : require("../assets/helmet-light.png")}
+      style={{ width, height }}
+      resizeMode="contain"
+    />
+  );
+}
+
+export function HelmetMark({ size = 24, color = PAPER, slashed = false }: { size?: number; color?: string; slashed?: boolean }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 32 32" fill="none">
+      <Path
+        d="M6 18.5c.4-6.2 4.4-10 10-10s9.6 3.8 10 10c2.2.4 4 2 4 4.2 0 2.2-1.8 3.8-4.2 3.8H6.2C3.8 26.5 2 24.9 2 22.7c0-2.2 1.8-3.8 4-4.2z"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+      />
+      <Path d="M7 19.5h18" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+      {slashed ? <Path d="M9 8.5 L23.5 25" stroke={color} strokeWidth={1.8} strokeLinecap="round" /> : null}
+    </Svg>
+  );
+}
+
+export function CheckIcon({ size = 16, color = INK }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M5 12.5 L10 17.5 L19 7" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+export function MicIcon({ size = 16, color = PAPER }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M12 3 a3 3 0 0 1 3 3 v6 a3 3 0 0 1 -6 0 V6 a3 3 0 0 1 3 -3z" stroke={color} strokeWidth={1.8} />
+      <Path d="M7 11 a5 5 0 0 0 10 0 M12 16 v4 M9 20 h6" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+export function TargetIcon({ size = 18, color = PAPER }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx="12" cy="12" r="3.2" stroke={color} strokeWidth={1.8} />
+      <Path d="M12 3 V7 M12 17 V21 M3 12 H7 M17 12 H21" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+export function SwapIcon({ size = 20, color = PAPER }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M8 4 V20 M8 4 L5 8 M8 4 L11 8" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M16 20 V4 M16 20 L13 16 M16 20 L19 16" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+export function PinIcon({ size = 16, color = YELLOW }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M12 21.5 C12 21.5 5.5 14.2 5.5 10 a6.5 6.5 0 0 1 13 0 c0 4.2-6.5 11.5-6.5 11.5z" fill={color} />
+      <Circle cx="12" cy="10" r="2.2" fill={INK} />
+    </Svg>
   );
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Dimensions, Easing, Keyboard, KeyboardEvent, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import Svg, { Rect, Text as SvgText } from "react-native-svg";
 import { initialWindowMetrics, SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { requestRecordingPermissionsAsync, useAudioStream } from "expo-audio";
 import { StatusBar } from "expo-status-bar";
@@ -9,8 +10,9 @@ import { DebugSide, debugStopCue, debugTurnCue, directionForDebugSide } from "./
 import { demoLeftTurn } from "./src/demo";
 import { distanceM, LatLng } from "./src/geo";
 import { CueEngine, Fix, Route, fixAlong } from "./src/engine";
+import { GoFilm } from "./src/GoFilm";
 import { GpsReading, gpsStatus, readingFromCoords } from "./src/gps";
-import { BluetoothIcon, ChevronLeftIcon, CueArrow, GearIcon, HelmetTile, MiniVehicle, MUTED, PersonIcon, RiderBadge, SearchIcon, SURFACE, VehicleKind, YELLOW } from "./src/icons";
+import { BluetoothIcon, CheckIcon, ChevronLeftIcon, CueArrow, GearIcon, HelmetArt, MicIcon, MiniVehicle, MUTED, PersonIcon, PinIcon, RiderBadge, SURFACE, SwapIcon, TargetIcon, VehicleKind, YELLOW } from "./src/icons";
 import { HelmetLink } from "./src/link";
 import { createPhoneRadio } from "./src/radio";
 import { PlaceChoice, routeBetween, searchPlaces } from "./src/routing";
@@ -66,6 +68,13 @@ function HelmetScreen() {
   const executeRef = useRef<(command: VoiceCommand) => Promise<string>>(async () => "{}");
   const [listening, setListening] = useState(false);
   const [voiceNote, setVoiceNote] = useState("");
+  const [helmetPhase, setHelmetPhase] = useState<"off" | "searching" | "on">("off");
+  const [linkNote, setLinkNote] = useState("");
+  const [focusNonce, setFocusNonce] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const [pillWidth, setPillWidth] = useState(0);
+  const scanningRef = useRef(false);
+  const swapTurn = useRef(new Animated.Value(0)).current;
   const debugHoldRef = useRef<DebugSide | null>(null);
   const [debugHold, setDebugHold] = useState<DebugSide | null>(null);
   const [sensors, setSensors] = useState<SensorSample | null>(null);
@@ -238,6 +247,10 @@ function HelmetScreen() {
     setRiding(next);
   }
 
+  function linked(state: ScreenState): ScreenState {
+    return { ...state, bleConnected: linkRef.current?.connected === true };
+  }
+
   async function publish(fix: Fix): Promise<void> {
     const link = linkRef.current;
     const now = Date.now() / 1000;
@@ -266,22 +279,36 @@ function HelmetScreen() {
   }
 
   async function connectHelmet(): Promise<void> {
-    setBleMessage("Looking for SmartHelmet…");
+    if (scanningRef.current) return;
+    scanningRef.current = true;
+    setHelmetPhase("searching");
+    setLinkNote("");
+    setBleMessage("Searching…");
     try {
       if (linkRef.current?.connected) await linkRef.current.disconnect();
       const radio = await createPhoneRadio();
       const link = new HelmetLink(radio);
       const found = await link.scan();
       if (!found) {
-        setBleMessage("SmartHelmet was not found. If Android Bluetooth settings is connected to it, disconnect it there and try again.");
+        const message = "SmartHelmet was not found. If Android Bluetooth settings is connected to it, disconnect it there and try again.";
+        setBleMessage(message);
+        setLinkNote(message);
+        setHelmetPhase("off");
         return;
       }
       await link.connect(found);
       linkRef.current = link;
       setBleMessage("Connected to SmartHelmet");
+      setLinkNote("");
+      setHelmetPhase("on");
       setScreen((current: ScreenState) => ({ ...current, bleConnected: true }));
     } catch (error) {
-      setBleMessage(error instanceof Error ? error.message : "Bluetooth failed");
+      const message = error instanceof Error ? error.message : "Bluetooth failed";
+      setBleMessage(message);
+      setLinkNote(message);
+      setHelmetPhase("off");
+    } finally {
+      scanningRef.current = false;
     }
   }
 
@@ -353,7 +380,7 @@ function HelmetScreen() {
     if (phase === "idle") sessionRef.current.preview(engineRef.current.route, "demo", "Left turn");
     if (sessionRef.current.screen().phase === "preview") {
       sessionRef.current.start();
-      setScreen(sessionRef.current.screen());
+      setScreen(linked(sessionRef.current.screen()));
     }
     distanceRef.current = 0;
     engineRef.current = new CueEngine(engineRef.current.route);
@@ -361,6 +388,16 @@ function HelmetScreen() {
     setPage("ride");
     setStatus("Playing the left turn at 8 m/s.");
     void publish(fixAlong(engineRef.current.route, 0, DEMO_SPEED_MPS));
+  }
+
+  function pressSwap(): void {
+    setFlipped((value) => !value);
+    Animated.timing(swapTurn, {
+      toValue: flipped ? 0 : 1,
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
   }
 
   function pressGo(): void {
@@ -378,7 +415,7 @@ function HelmetScreen() {
     if (chosenPlace.current) {
       if (sessionRef.current.screen().phase === "preview") {
         sessionRef.current.start();
-        setScreen(sessionRef.current.screen());
+        setScreen(linked(sessionRef.current.screen()));
       }
       setPage("ride");
       setRide(true);
@@ -455,6 +492,8 @@ function HelmetScreen() {
       setVoiceNote("Microphone permission is off.");
       return;
     }
+    Keyboard.dismiss();
+    setChoices([]);
     try {
       await prepareVoiceAudio();
       if (!agentRef.current) {
@@ -522,7 +561,12 @@ function HelmetScreen() {
   const userPoint: [number, number] | null = gpsRef.current ? [gpsRef.current.lat, gpsRef.current.lng] : null;
   const routePoints = screen.remaining.length > 1 ? screen.remaining : screen.traveled.concat(screen.remaining);
   const tripMeters = pathMeters(routePoints);
-  const showGo = page === "search" && screen.phase === "preview" && !typing;
+  const showGo = page === "search" && screen.phase === "preview" && !typing && !listening;
+  const notice = linkNote || (!listening && voiceNote ? voiceNote : "") || (quietStatus(status) ? "" : status);
+  const swapSpin = swapTurn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] });
+  const locationLabel = flipped ? "Where to?" : "Your location";
+  const destinationLabel = flipped ? "Your location" : "Where to?";
+  const connectLabel = helmetPhase === "on" ? "Helmet connected" : helmetPhase === "searching" ? "Searching…" : "Connect helmet";
 
   return (
     <View style={styles.screen}>
@@ -586,17 +630,12 @@ function HelmetScreen() {
                 <Text style={[styles.choicePillText, units === "imperial" ? styles.choiceTextOn : null]}>Imperial mi</Text>
               </Pressable>
             </View>
-            <Text style={styles.sectionLabel}>VOICE</Text>
-            <Text style={styles.note}>{voiceNote || (listening ? "Listening. Tap Done when you finish." : "Say a place, go, what is next, or end the ride.")}</Text>
-            <View style={styles.pillRow}>
-              <Pressable style={styles.ghostPill} onPress={() => void toggleVoice()}>
-                <Text style={styles.ghostText}>{listening ? "Done" : "Talk"}</Text>
+            <View style={styles.footerLinks}>
+              <Pressable onPress={() => (playing ? setPlaying(false) : playDemo())}>
+                <Text style={styles.footerLink}>{playing ? "Pause demo" : "Play demo"}</Text>
               </Pressable>
-              <Pressable style={styles.ghostPill} onPress={() => (playing ? setPlaying(false) : playDemo())}>
-                <Text style={styles.ghostText}>{playing ? "Pause demo" : "Play demo"}</Text>
-              </Pressable>
-              <Pressable style={styles.ghostPill} onPress={openDebug}>
-                <Text style={styles.ghostText}>Debug</Text>
+              <Pressable onPress={openDebug}>
+                <Text style={styles.footerLink}>Debug</Text>
               </Pressable>
             </View>
           </ScrollView>
@@ -604,10 +643,30 @@ function HelmetScreen() {
           <View style={styles.body}>
             {page === "ride" ? (
               <View style={styles.topBar}>
-                <View style={styles.connectedPill}>
-                  <HelmetTile size={28} />
-                  <Text style={styles.connectedText}>{screen.bleConnected ? "Helmet connected" : "Helmet offline"}</Text>
-                  {screen.bleConnected ? <View style={styles.blueDot} /> : null}
+                <View
+                  style={[styles.ridePill, screen.bleConnected ? styles.ridePillOn : null]}
+                  onLayout={(event) => {
+                    const next = event.nativeEvent.layout.width;
+                    setPillWidth((current) => (current === next ? current : next));
+                  }}
+                >
+                  {screen.bleConnected && pillWidth > 0 ? (
+                    <Svg width={pillWidth} height={52} style={StyleSheet.absoluteFill}>
+                      <Rect width={pillWidth} height={52} rx={26} fill="#F2F2F0" />
+                    </Svg>
+                  ) : null}
+                  <HelmetArt width={40} tone={screen.bleConnected ? "dark" : "light"} />
+                  <Text style={[styles.ridePillText, screen.bleConnected ? styles.ridePillTextOn : null]} numberOfLines={1}>
+                    {screen.bleConnected ? "Helmet connected" : "Helmet offline"}
+                  </Text>
+                  {screen.bleConnected ? (
+                    <View style={styles.rideCheck} accessibilityLabel="Connected">
+                      <Svg width={28} height={28} style={StyleSheet.absoluteFill}>
+                        <Rect width={28} height={28} rx={14} fill="#14161A" />
+                      </Svg>
+                      <CheckIcon size={16} color={TEXT} />
+                    </View>
+                  ) : null}
                 </View>
                 <Pressable style={styles.endButton} onPress={endRide} accessibilityLabel="End ride">
                   <Text style={styles.endText}>End</Text>
@@ -616,144 +675,239 @@ function HelmetScreen() {
             ) : (
               <>
                 <View style={styles.topBar}>
-                  <Pressable style={styles.connect} onPress={() => void connectHelmet()}>
-                    <BluetoothIcon />
-                    <Text style={styles.connectText}>Connect helmet</Text>
+                  <Pressable
+                    style={styles.connect}
+                    onPress={() => void connectHelmet()}
+                    disabled={helmetPhase === "searching"}
+                    accessibilityLabel={connectLabel}
+                    accessibilityState={{ selected: helmetPhase === "on" }}
+                  >
+                    <BluetoothIcon size={20} />
+                    <Text style={styles.connectText} numberOfLines={1}>{connectLabel}</Text>
                   </Pressable>
-                  <HelmetTile size={40} />
-                  <Pressable style={styles.roundButton} onPress={openDebug} accessibilityLabel="Debug">
+                  <Pressable
+                    style={styles.helmetButton}
+                    onPress={() => void connectHelmet()}
+                    disabled={helmetPhase === "searching"}
+                    accessibilityLabel={helmetPhase === "on" ? "Helmet connected" : "Helmet disconnected"}
+                    accessibilityState={{ selected: helmetPhase === "on" }}
+                  >
+                    <HelmetArt width={34} tone="light" />
+                    {helmetPhase === "on" ? null : <View style={styles.helmetSlash} />}
+                  </Pressable>
+                  <Pressable style={styles.homeCircle} onPress={openDebug} accessibilityLabel="Debug">
                     <Text style={styles.debugMark}>D</Text>
                   </Pressable>
-                  <Pressable style={styles.roundButton} onPress={openSettings} accessibilityLabel="Settings">
-                    <GearIcon size={22} />
+                  <Pressable style={styles.homeCircle} onPress={openSettings} accessibilityLabel="Open settings">
+                    <GearIcon size={26} />
                   </Pressable>
                 </View>
-                <View style={styles.search}>
-                  <SearchIcon />
-                  <TextInput
-                    style={styles.searchInput}
-                    value={destination}
-                    onChangeText={setDestination}
-                    placeholder="Where to?"
-                    placeholderTextColor={MUTED}
-                    autoCapitalize="words"
-                    returnKeyType="search"
-                    onSubmitEditing={() => void findPlaces()}
-                  />
+                <View style={styles.routeCard}>
+                  <View style={styles.markers}>
+                    <View style={styles.originDot} />
+                    <View style={styles.markerLine} />
+                    <PinIcon size={16} />
+                  </View>
+                  <View style={styles.routeFields}>
+                    <View style={styles.fieldRow}>
+                      <Text style={styles.fieldText} numberOfLines={1}>{locationLabel}</Text>
+                      <Pressable style={styles.iconButton} onPress={() => setFocusNonce((value) => value + 1)} accessibilityLabel="Use current location">
+                        <TargetIcon size={20} />
+                      </Pressable>
+                    </View>
+                    <View style={styles.fieldDivider} />
+                    <View style={styles.fieldRow}>
+                      {flipped ? (
+                        <Text style={styles.fieldText} numberOfLines={1}>{destinationLabel}</Text>
+                      ) : listening ? (
+                        <View style={styles.listeningRow}>
+                          <Waveform />
+                          <Text style={styles.fieldText}>Listening…</Text>
+                        </View>
+                      ) : (
+                        <TextInput
+                          style={styles.searchInput}
+                          value={destination}
+                          onChangeText={setDestination}
+                          placeholder={destinationLabel}
+                          placeholderTextColor={TEXT}
+                          autoCapitalize="words"
+                          returnKeyType="search"
+                          onSubmitEditing={() => void findPlaces()}
+                        />
+                      )}
+                      <View style={styles.micWrap}>
+                        {listening ? <PulseRings size={40} /> : null}
+                        <Pressable
+                          style={styles.iconButton}
+                          onPress={() => void toggleVoice()}
+                          accessibilityLabel={listening ? "Stop listening" : "Use voice input"}
+                        >
+                          <MicIcon size={20} />
+                        </Pressable>
+                      </View>
+                    </View>
+                  </View>
+                  <Pressable style={styles.swapButton} onPress={pressSwap} accessibilityLabel="Swap route locations">
+                    <Animated.View style={{ transform: [{ rotate: swapSpin }] }}>
+                      <SwapIcon size={22} />
+                    </Animated.View>
+                  </Pressable>
                 </View>
+                {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+                {searching ? <Text style={styles.notice}>Searching places…</Text> : null}
+                {choices.length > 0 ? (
+                  <ScrollView style={styles.choices} keyboardShouldPersistTaps="handled">
+                    {choices.map((place, index) => (
+                      <Pressable key={`${place.point[0]},${place.point[1]},${index}`} style={styles.choice} onPress={() => void choosePlace(place)}>
+                        <Text style={styles.choiceName} numberOfLines={1}>{place.name}</Text>
+                        <Text style={styles.choiceDetail} numberOfLines={2}>{place.detail}</Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                ) : null}
               </>
             )}
-            <View style={[styles.mapFrame, page === "search" && typing ? styles.mapTyping : null]}>
-              <StreetMap screen={screen} vehicle={vehicle} user={userPoint} />
-              {page === "ride" && tripMeters > 20 ? (
+            <View style={[styles.mapFrame, page === "ride" ? styles.mapRide : styles.mapHome, page === "search" && typing ? styles.mapTyping : null]}>
+              <StreetMap screen={screen} vehicle={vehicle} user={userPoint} focusNonce={focusNonce} />
+              {page === "ride" && tripMeters > 0 ? (
                 <View style={styles.tripChip}>
                   <Text style={styles.tripText}>{formatTrip(tripMeters, units)}</Text>
                 </View>
               ) : null}
               {showGo ? (
                 <Pressable style={styles.go} onPress={pressGo} accessibilityLabel="Go">
-                  <Text style={styles.goText}>GO</Text>
+                  <Svg width={104} height={64} viewBox="0 0 104 64">
+                    <Rect width={104} height={64} rx={18} fill="#FFC400" />
+                    <SvgText x={52} y={41} fill="#14161A" fontSize={26} fontWeight="800" textAnchor="middle">
+                      GO
+                    </SvgText>
+                  </Svg>
                 </Pressable>
               ) : null}
             </View>
-            {page === "search" && searching ? <Text style={styles.note}>Searching places…</Text> : null}
-            {page === "search" && choices.length > 0 ? (
-              <ScrollView style={styles.choices} keyboardShouldPersistTaps="handled">
-                {choices.map((place, index) => (
-                  <Pressable key={`${place.point[0]},${place.point[1]},${index}`} style={styles.choice} onPress={() => void choosePlace(place)}>
-                    <Text style={styles.choiceName} numberOfLines={1}>{place.name}</Text>
-                    <Text style={styles.choiceDetail} numberOfLines={2}>{place.detail}</Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            ) : null}
             {page === "ride" ? (
-              <>
+              <View style={styles.vibeBlock}>
                 {screen.banner ? <Text style={styles.banner}>{screen.banner}</Text> : null}
                 <Text style={styles.vibeCaption}>VIBRATING ON YOUR HELMET</Text>
-                <View style={styles.motors}>
+                <View style={styles.motors} accessibilityLabel="Helmet vibration">
                   <VibrationPad label="Left" direction="left" on={screen.motors.left} />
                   <VibrationPad label="Front" direction="up" on={screen.motors.front} />
                   <VibrationPad label="Right" direction="right" on={screen.motors.right} />
                 </View>
-              </>
+              </View>
             ) : null}
           </View>
         )}
       </View>
-      {departing ? <RideOff vehicle={vehicle} onDone={beginRide} /> : null}
+      {departing ? <GoFilm onDone={beginRide} /> : null}
     </View>
   );
 }
 
-function RideOff({ vehicle, onDone }: { vehicle: VehicleKind; onDone: () => void }) {
-  const slide = useRef(new Animated.Value(0)).current;
-  const bob = useRef(new Animated.Value(0)).current;
-  const doneRef = useRef(onDone);
-  doneRef.current = onDone;
+function quietStatus(text: string): boolean {
+  return text === "Search for a place, or press GO."
+    || text.endsWith(" is ready.")
+    || text.startsWith("Press GO")
+    || text.startsWith("Riding to")
+    || text.startsWith("Playing the left")
+    || text.startsWith("Ride north");
+}
 
+function PulseRings({ size, color = TEXT }: { size: number; color?: string }) {
+  const first = useRef(new Animated.Value(0)).current;
+  const second = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    const width = Dimensions.get("window").width;
-    slide.setValue(-90);
-    const cruise = Animated.timing(slide, {
-      toValue: width + 20,
-      duration: 1400,
-      easing: Easing.inOut(Easing.quad),
-      useNativeDriver: true,
-    });
-    const hop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(bob, { toValue: -8, duration: 150, useNativeDriver: true }),
-        Animated.timing(bob, { toValue: 0, duration: 150, useNativeDriver: true }),
-      ]),
-    );
-    hop.start();
-    cruise.start(({ finished }) => {
-      hop.stop();
-      if (finished) doneRef.current();
-    });
-    return () => {
-      cruise.stop();
-      hop.stop();
+    const play = (value: Animated.Value, delay: number) => {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(value, { toValue: 1, duration: 1400, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+          Animated.timing(value, { toValue: 0, duration: 0, useNativeDriver: true }),
+        ]),
+      );
+      loop.start();
+      return loop;
     };
-  }, [bob, slide]);
-
+    const one = play(first, 0);
+    const two = play(second, 700);
+    return () => {
+      one.stop();
+      two.stop();
+    };
+  }, [first, second]);
+  const ring = (value: Animated.Value) => (
+    <Animated.View
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        borderWidth: 2,
+        borderColor: color,
+        opacity: value.interpolate({ inputRange: [0, 1], outputRange: [0.7, 0] }),
+        transform: [{ scale: value.interpolate({ inputRange: [0, 1], outputRange: [1, 1.7] }) }],
+      }}
+    />
+  );
   return (
-    <View style={styles.transition}>
-      <Animated.View style={{ transform: [{ translateX: slide }, { translateY: bob }] }}>
-        <RiderBadge kind={vehicle} size={84} />
-      </Animated.View>
+    <View pointerEvents="none" style={{ position: "absolute", width: size, height: size }}>
+      {ring(first)}
+      {ring(second)}
+    </View>
+  );
+}
+
+function Waveform() {
+  const a = useRef(new Animated.Value(0.35)).current;
+  const b = useRef(new Animated.Value(0.35)).current;
+  const c = useRef(new Animated.Value(0.35)).current;
+  const d = useRef(new Animated.Value(0.35)).current;
+  useEffect(() => {
+    const loops = [a, b, c, d].map((value, index) => {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.delay(index * 90),
+          Animated.timing(value, { toValue: 1, duration: 280, useNativeDriver: true }),
+          Animated.timing(value, { toValue: 0.35, duration: 280, useNativeDriver: true }),
+        ]),
+      );
+      loop.start();
+      return loop;
+    });
+    return () => loops.forEach((loop) => loop.stop());
+  }, [a, b, c, d]);
+  return (
+    <View style={styles.wave}>
+      {[a, b, c, d].map((value, index) => (
+        <Animated.View key={index} style={[styles.waveBar, { transform: [{ scaleY: value }] }]} />
+      ))}
     </View>
   );
 }
 
 function VibrationPad({ label, direction, on }: { label: string; direction: "left" | "up" | "right"; on: boolean }) {
-  const shake = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (!on) {
-      shake.setValue(0);
-      return undefined;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(shake, { toValue: 1, duration: 55, useNativeDriver: true }),
-        Animated.timing(shake, { toValue: -1, duration: 55, useNativeDriver: true }),
-        Animated.timing(shake, { toValue: 0, duration: 55, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [on, shake]);
-
-  const translateX = shake.interpolate({ inputRange: [-1, 1], outputRange: [-2.5, 2.5] });
-  const ink = on ? BG : TEXT;
+  const [box, setBox] = useState({ width: 0, height: 0 });
+  const ink = on ? "#14161A" : TEXT;
   return (
-    <Animated.View style={[styles.motor, on ? styles.motorOn : null, { transform: [{ translateX }] }]}>
-      <CueArrow direction={direction} color={ink} />
+    <View
+      pointerEvents="none"
+      onLayout={(event) => {
+        const { width, height } = event.nativeEvent.layout;
+        setBox((current) => (current.width === width && current.height === height ? current : { width, height }));
+      }}
+      style={[styles.motor, on ? styles.motorOn : null]}
+    >
+      {on && box.width > 0 ? (
+        <Svg width={box.width} height={box.height} style={StyleSheet.absoluteFill}>
+          <Rect width={box.width} height={box.height} rx={18} fill="#FFC400" />
+        </Svg>
+      ) : null}
+      <CueArrow direction={direction} size={30} color={ink} />
       <Text style={[styles.motorText, on ? styles.motorTextOn : null]}>{label}</Text>
-      <Text style={[styles.motorState, on ? styles.motorTextOn : null]}>{on ? "Buzzing" : "Idle"}</Text>
-    </Animated.View>
+      <Text style={[styles.motorState, on ? styles.motorStateOn : null]}>{on ? "Buzzing" : "Idle"}</Text>
+    </View>
   );
 }
 
@@ -781,33 +935,55 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: BG, paddingHorizontal: 16 },
   body: { flex: 1, gap: 12 },
   topBar: { flexDirection: "row", alignItems: "center", gap: 10 },
-  connect: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1.5, borderColor: TEXT, borderRadius: 28, paddingVertical: 12, paddingHorizontal: 16 },
+  connect: { flex: 1, height: 52, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, borderWidth: 2, borderStyle: "dashed", borderColor: MUTED, borderRadius: 26, paddingHorizontal: 12, overflow: "hidden" },
   connectText: { color: TEXT, fontWeight: "700", fontSize: 16 },
+  helmetButton: { width: 52, height: 52, borderRadius: 26, backgroundColor: BG, borderWidth: 2, borderStyle: "dashed", borderColor: MUTED, alignItems: "center", justifyContent: "center" },
+  helmetSlash: { position: "absolute", left: 3, top: 24.5, width: 46, height: 3, borderRadius: 2, backgroundColor: MUTED, transform: [{ rotate: "45deg" }] },
+  homeCircle: { width: 52, height: 52, borderRadius: 26, backgroundColor: SURFACE, borderWidth: 2, borderColor: "#4A4E54", alignItems: "center", justifyContent: "center" },
   roundButton: { width: 46, height: 46, borderRadius: 23, backgroundColor: SURFACE, alignItems: "center", justifyContent: "center" },
-  search: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: SURFACE, borderRadius: 16, paddingHorizontal: 14, height: 48 },
-  searchInput: { flex: 1, color: TEXT, fontSize: 16, paddingVertical: 0 },
-  mapFrame: { flex: 1, minHeight: 180, borderRadius: 18, overflow: "hidden", backgroundColor: "#1a1c22" },
-  mapTyping: { flex: 0, height: 140, minHeight: 0 },
-  go: { position: "absolute", right: 16, bottom: 16, minWidth: 92, height: 64, borderRadius: 20, backgroundColor: YELLOW, alignItems: "center", justifyContent: "center", paddingHorizontal: 22 },
-  goText: { color: BG, fontSize: 26, fontWeight: "800" },
-  tripChip: { position: "absolute", left: 12, top: 12, backgroundColor: SURFACE, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
-  tripText: { color: TEXT, fontWeight: "700", fontSize: 14 },
-  choices: { flex: 1, borderRadius: 16, backgroundColor: SURFACE },
+  routeCard: { height: 110, flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 14, paddingRight: 8, backgroundColor: SURFACE, borderRadius: 16, borderWidth: 2, borderColor: "#4A4E54" },
+  markers: { width: 20, height: 106, alignItems: "center", justifyContent: "space-between", paddingVertical: 18 },
+  markerLine: { position: "absolute", top: 32, bottom: 32, width: 2, backgroundColor: "#4A4E54" },
+  routeFields: { flex: 1 },
+  fieldRow: { height: 52, flexDirection: "row", alignItems: "center", gap: 6 },
+  fieldText: { flex: 1, color: TEXT, fontSize: 16, fontWeight: "500" },
+  fieldDivider: { height: 2, backgroundColor: "#4A4E54" },
+  originDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#3DA5FF" },
+  searchInput: { flex: 1, color: TEXT, fontSize: 16, fontWeight: "500", paddingVertical: 0 },
+  iconButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: BG, borderWidth: 2, borderColor: "#4A4E54", alignItems: "center", justifyContent: "center" },
+  micWrap: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  listeningRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
+  wave: { width: 22, height: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  waveBar: { width: 3, height: 16, borderRadius: 2, backgroundColor: TEXT },
+  swapButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: BG, borderWidth: 2, borderColor: "#4A4E54", alignItems: "center", justifyContent: "center" },
+  notice: { color: MUTED, fontSize: 13, lineHeight: 18 },
+  mapFrame: { flex: 1, minHeight: 160, borderRadius: 22, overflow: "hidden", backgroundColor: "#1a1c22" },
+  mapHome: { borderRadius: 0 },
+  mapRide: { borderRadius: 20, borderWidth: 2, borderColor: "#4A4E54" },
+  mapTyping: { flex: 0, height: 120, minHeight: 0 },
+  go: { position: "absolute", right: 16, bottom: 16, width: 104, height: 64, zIndex: 2 },
+  tripChip: { position: "absolute", left: 12, top: 12, backgroundColor: SURFACE, borderRadius: 12, borderWidth: 2, borderColor: "#4A4E54", paddingHorizontal: 12, paddingVertical: 8 },
+  tripText: { color: TEXT, fontWeight: "700", fontSize: 15 },
+  choices: { maxHeight: 220, borderRadius: 16, backgroundColor: SURFACE },
   choice: { paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#3a3e46" },
   choiceName: { color: TEXT, fontWeight: "700" },
   choiceDetail: { color: MUTED, fontSize: 12 },
-  connectedPill: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: SURFACE, borderRadius: 28, paddingVertical: 6, paddingLeft: 6, paddingRight: 14 },
-  connectedText: { flex: 1, color: TEXT, fontWeight: "700", fontSize: 15 },
-  blueDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#3DA5FF" },
-  endButton: { borderWidth: 1.5, borderColor: TEXT, borderRadius: 24, paddingVertical: 10, paddingHorizontal: 18 },
+  ridePill: { flex: 1, height: 52, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 26, borderWidth: 2, borderColor: TEXT, paddingLeft: 14, paddingRight: 10, overflow: "hidden" },
+  ridePillOn: { borderColor: "#F2F2F0" },
+  rideCheck: { width: 28, height: 28, alignItems: "center", justifyContent: "center" },
+  ridePillText: { flex: 1, color: TEXT, fontWeight: "700", fontSize: 16 },
+  ridePillTextOn: { color: "#14161A" },
+  endButton: { height: 52, borderWidth: 2, borderColor: TEXT, borderRadius: 26, paddingHorizontal: 22, alignItems: "center", justifyContent: "center" },
   endText: { color: TEXT, fontWeight: "700", fontSize: 16 },
-  vibeCaption: { color: MUTED, fontSize: 12, fontWeight: "700", letterSpacing: 1.2 },
+  vibeBlock: { gap: 8 },
+  vibeCaption: { color: MUTED, fontSize: 14, fontWeight: "700", letterSpacing: 0.84 },
   motors: { flexDirection: "row", gap: 10 },
-  motor: { flex: 1, minHeight: 92, borderRadius: 16, backgroundColor: SURFACE, alignItems: "center", justifyContent: "center", gap: 2, paddingVertical: 10 },
-  motorOn: { backgroundColor: YELLOW },
-  motorText: { color: TEXT, fontWeight: "800", fontSize: 16 },
-  motorTextOn: { color: BG },
-  motorState: { color: MUTED, fontSize: 12, fontWeight: "600" },
+  motor: { flex: 1, minHeight: 112, borderRadius: 18, borderWidth: 2, borderColor: "#4A4E54", backgroundColor: SURFACE, alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: 14, overflow: "hidden" },
+  motorOn: { backgroundColor: "transparent", borderColor: "#FFC400" },
+  motorText: { color: TEXT, fontWeight: "800", fontSize: 17 },
+  motorTextOn: { color: "#14161A" },
+  motorState: { color: TEXT, fontSize: 13, fontWeight: "500" },
+  motorStateOn: { color: "#14161A", fontWeight: "700" },
   banner: { color: YELLOW, fontSize: 16, fontWeight: "700" },
   transition: { ...StyleSheet.absoluteFill, backgroundColor: BG, alignItems: "flex-start", justifyContent: "center" },
   settings: { gap: 14, paddingBottom: 28 },
@@ -824,7 +1000,7 @@ const styles = StyleSheet.create({
   choiceTextOn: { color: BG },
   noteRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   note: { flex: 1, color: TEXT, fontSize: 14, lineHeight: 19 },
-  ghostPill: { flex: 1, borderRadius: 16, minHeight: 48, alignItems: "center", justifyContent: "center", backgroundColor: SURFACE },
-  ghostText: { color: TEXT, fontWeight: "700" },
+  footerLinks: { flexDirection: "row", gap: 22, marginTop: 18 },
+  footerLink: { color: MUTED, fontWeight: "700", fontSize: 15 },
   debugMark: { color: TEXT, fontWeight: "800", fontSize: 18 },
 });
