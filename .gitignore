@@ -1,2 +1,3 @@
 shared/
 firmware/.pio/
+firmware/include/secrets.h

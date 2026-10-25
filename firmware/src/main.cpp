@@ -14,6 +14,7 @@
 #include "heading.h"
 #include "pins.h"
 #include "protocol.h"
+#include "telemetry.h"
 
 #include <math.h>
 #include <string.h>
@@ -99,6 +100,9 @@ static Cue activeCue = {DIRECTION_NONE, 0, 0, 0, 0};
 static uint32_t cueReceivedMs = 0;
 static bool cueFresh = false;
 static bool clientConnected = false;
+static volatile uint32_t cuesReceived = 0;
+static uint32_t staleStops = 0;
+static uint32_t brakeCount = 0;
 
 static uint8_t readButtons(void) {
     uint8_t buttons = 0;
@@ -264,6 +268,7 @@ class CueCallbacks : public BLECharacteristicCallbacks {
         activeCue = cue;
         cueReceivedMs = millis();
         cueFresh = true;
+        cuesReceived = cuesReceived + 1;
     }
 };
 
@@ -327,6 +332,19 @@ void setup(void) {
     advertising->setScanResponse(true);
     BLEDevice::startAdvertising();
     Serial.println("SmartHelmet advertising");
+    telemetry_begin();
+}
+
+// A turn cue that ran past CUE_STALE_MS without a refresh: the phone link dropped mid-cue.
+static void countStaleStop(uint32_t now) {
+    static uint32_t countedCueMs = 0;
+    if (!cueFresh || activeCue.direction == DIRECTION_NONE || activeCue.intensity == 0) {
+        return;
+    }
+    if (now - cueReceivedMs > CUE_STALE_MS && countedCueMs != cueReceivedMs) {
+        countedCueMs = cueReceivedMs;
+        staleStops += 1;
+    }
 }
 
 void loop(void) {
@@ -336,8 +354,11 @@ void loop(void) {
     static uint32_t lastMicMs = 0;
     static BrakeState brakeState = {};
     static bool braking = false;
+    static uint32_t brakeStartMs = 0;
+    static float brakePeakG = 0.0f;
     uint32_t now = millis();
     applyCue(now);
+    countStaleStop(now);
     if (micReady && now - lastMicMs >= kImuPeriodMs) {
         int32_t sample = 0;
         if (readMicrophone(&sample)) {
@@ -356,7 +377,19 @@ void loop(void) {
         if (mpuRead(&ax, &ay, &az, &gx, &gy, &gz)) {
             rememberImu(ax, ay, az, gx, gy, gz);
             Serial.printf("imu,%lu,%.4f,%.4f,%.4f,%.2f,%.2f,%.2f\n", now, ax, ay, az, gx, gy, gz);
+            bool wasBraking = braking;
             braking = brake_update(&brakeState, ax, ay, az, gy, now - lastImuMs) == 1;
+            if (braking && !wasBraking) {
+                brakeStartMs = now;
+                brakePeakG = 0.0f;
+            }
+            if (braking && ax - brakeState.gravity_x > brakePeakG) {
+                brakePeakG = ax - brakeState.gravity_x;
+            }
+            if (!braking && wasBraking) {
+                brakeCount += 1;
+                telemetry_brake(now - brakeStartMs, brakePeakG);
+            }
         }
         lastImuMs = now;
     }
@@ -369,4 +402,6 @@ void loop(void) {
         notifyHelmetState();
         lastNotifyMs = now;
     }
+    HelmetStats stats = {clientConnected, mpuReady, micReady, cuesReceived, staleStops, brakeCount};
+    telemetry_loop(now, &stats);
 }

@@ -22,8 +22,11 @@ import { Cue, SensorSample } from "./src/protocol";
 import { VoiceCommand, VOICE_SAMPLE_RATE, prepareMicPcm, voiceKeyConfigured, whatsNextResult } from "./src/voice";
 import { VoiceAgent } from "./src/voiceAgent";
 import { connectGrokVoice, prepareVoiceAudio } from "./src/voiceLive";
+import { convexSink } from "./src/convexSink";
+import { RideRecorder, newSessionKey } from "./src/telemetry";
 
 const DEMO_SPEED_MPS = 8;
+const recorder = new RideRecorder(convexSink(process.env.EXPO_PUBLIC_CONVEX_URL), newSessionKey());
 type Page = "search" | "ride" | "settings" | "debug";
 
 export default function App() {
@@ -261,13 +264,18 @@ function HelmetScreen() {
     lastRidePoint.current = point;
     if (previous) {
       const step = distanceM(previous, point);
-      if (step > 0.4 && step < 80) setRiddenM((meters) => meters + step);
+      if (step > 0.4 && step < 80) {
+        setRiddenM((meters) => meters + step);
+        recorder.addDistance(step);
+      }
     }
+    recorder.observe(decision, fix, Boolean(link?.connected));
     setScreen(sessionRef.current.update(fix, decision, Boolean(link?.connected), link?.headingAgeS ?? null));
     if (link?.connected && !debugHoldRef.current) await link.send(decision.cue, now);
   }
 
   function useRoute(route: Route, provider: string, name: string): void {
+    recorder.finish("replaced");
     setPlaying(false);
     setRide(false);
     chosenPlace.current = false;
@@ -284,6 +292,7 @@ function HelmetScreen() {
     setHelmetPhase("searching");
     setLinkNote("");
     setBleMessage("Searching…");
+    const scanStarted = Date.now();
     try {
       if (linkRef.current?.connected) await linkRef.current.disconnect();
       const radio = await createPhoneRadio();
@@ -291,6 +300,7 @@ function HelmetScreen() {
       const found = await link.scan();
       if (!found) {
         const message = "SmartHelmet was not found. If Android Bluetooth settings is connected to it, disconnect it there and try again.";
+        recorder.link("not_found", Date.now() - scanStarted);
         setBleMessage(message);
         setLinkNote(message);
         setHelmetPhase("off");
@@ -298,12 +308,14 @@ function HelmetScreen() {
       }
       await link.connect(found);
       linkRef.current = link;
+      recorder.link("connected", Date.now() - scanStarted);
       setBleMessage("Connected to SmartHelmet");
       setLinkNote("");
       setHelmetPhase("on");
       setScreen((current: ScreenState) => ({ ...current, bleConnected: true }));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Bluetooth failed";
+      recorder.link("failed", Date.now() - scanStarted, message);
       setBleMessage(message);
       setLinkNote(message);
       setHelmetPhase("off");
@@ -340,6 +352,7 @@ function HelmetScreen() {
     const here = await currentGps();
     if (!here) return;
     useRoute(demoLeftTurn(here.lat, here.lng), "demo", "Left turn from here");
+    recorder.begin({ kind: "here", provider: "demo", vehicle, route: engineRef.current.route, helmetConnected: linkRef.current?.connected === true });
     sessionRef.current.start();
     setScreen(sessionRef.current.screen());
     setRide(true);
@@ -384,6 +397,7 @@ function HelmetScreen() {
     }
     distanceRef.current = 0;
     engineRef.current = new CueEngine(engineRef.current.route);
+    recorder.begin({ kind: "demo", provider: "demo", vehicle, route: engineRef.current.route, helmetConnected: linkRef.current?.connected === true });
     setPlaying(true);
     setPage("ride");
     setStatus("Playing the left turn at 8 m/s.");
@@ -417,6 +431,13 @@ function HelmetScreen() {
         sessionRef.current.start();
         setScreen(linked(sessionRef.current.screen()));
       }
+      recorder.begin({
+        kind: "route",
+        provider: sessionRef.current.screen().providerName,
+        vehicle,
+        route: engineRef.current.route,
+        helmetConnected: linkRef.current?.connected === true,
+      });
       setPage("ride");
       setRide(true);
       const here = gpsRef.current;
@@ -428,6 +449,7 @@ function HelmetScreen() {
   }
 
   function endRide(): void {
+    recorder.finish("ended");
     setPlaying(false);
     setRide(false);
     const current = sessionRef.current.screen();

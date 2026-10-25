@@ -10,6 +10,7 @@ import { advertisementFromScan, HelmetLink } from "./link";
 import { helmetScanPermissions } from "./scanPermissions";
 import { DIRECTION_FRONT, DIRECTION_LEFT, DIRECTION_RIGHT, encodeCue, encodeSensorSample, SENSOR_CHARACTERISTIC_UUID, SERVICE_UUID } from "./protocol";
 import { NavSession } from "./screen";
+import { RideEvent, RideFinish, RideRecorder, RideStart } from "./telemetry";
 import { VoiceAgent } from "./voiceAgent";
 import {
   VOICE_TOOL_NAMES,
@@ -67,6 +68,46 @@ describe("phone navigator", () => {
     assert.equal(state.motors.left, true);
     assert.equal(state.motors.front, false);
     assert.equal(state.cueDirection, DIRECTION_LEFT);
+  });
+
+  it("logs the engine's cue once per change and totals the ride", () => {
+    const route = demoLeftTurn();
+    const engine = new CueEngine(route);
+    const started: RideStart[] = [];
+    const events: RideEvent[] = [];
+    const finished: RideFinish[] = [];
+    let clock = 1000;
+    const recorder = new RideRecorder(
+      {
+        rideStarted: (ride) => started.push(ride),
+        rideEvent: (event) => events.push(event),
+        rideFinished: (finish) => finished.push(finish),
+        linkEvent: () => {},
+      },
+      "s1",
+      () => clock,
+    );
+    recorder.begin({ kind: "demo", provider: "demo", vehicle: "bicycle", route, helmetConnected: true });
+    for (const meters of [0, 40, 80, 82, 84]) {
+      clock += 500;
+      const fix = fixAlong(route, meters, 10);
+      const decision = engine.update(fix);
+      recorder.addDistance(2);
+      recorder.observe(decision, fix, true);
+    }
+    recorder.finish("ended");
+    recorder.finish("ended");
+
+    assert.equal(started.length, 1);
+    assert.equal(started[0].rideKey, "s1-1");
+    assert.ok(started[0].routeM > 100);
+    const cues = events.filter((event) => event.kind === "cue");
+    assert.equal(cues.length, 1);
+    assert.equal(cues[0].direction, DIRECTION_LEFT);
+    assert.equal(finished.length, 1);
+    assert.equal(finished[0].cues, 1);
+    assert.equal(finished[0].riddenM, 10);
+    assert.equal(finished[0].reason, "ended");
   });
 
   it("scans with nearby devices on Android 12 and location before that", () => {
