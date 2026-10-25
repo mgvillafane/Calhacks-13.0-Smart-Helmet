@@ -43,6 +43,7 @@ export type Radio = {
   writeWithoutResponse: (characteristicUuid: string, payload: Uint8Array) => Promise<void>;
   subscribe: (characteristicUuid: string) => Promise<void>;
   takeNotifications: (characteristicUuid: string) => Promise<Uint8Array[]>;
+  read?: (characteristicUuid: string) => Promise<Uint8Array | null>;
 };
 
 export class HelmetLink {
@@ -64,7 +65,7 @@ export class HelmetLink {
   }
 
   get buttonPressed(): boolean {
-    return (this.buttons & BUTTON_PRESSED) !== 0;
+    return (this.buttons & (BUTTON_PRESSED | BUTTON_TALK)) !== 0;
   }
 
   takeAudio(): Uint8Array {
@@ -130,19 +131,14 @@ export class HelmetLink {
   async poll(nowS: number): Promise<void> {
     this.requireConnected();
     for (const packet of await this.radio.takeNotifications(HELMET_STATE_CHARACTERISTIC_UUID)) {
+      this.applyHelmetState(packet, nowS);
+    }
+    if (this.radio.read) {
       try {
-        const state = decodeHelmetState(packet);
-        this.buttons = state.buttons;
-        if (state.headingValid) {
-          this.headingDeg = state.headingDecidegrees / 10;
-          this.headingAtS = nowS;
-        } else {
-          this.headingDeg = null;
-          this.headingAgeS = null;
-          this.headingAtS = null;
-        }
+        const packet = await this.radio.read(HELMET_STATE_CHARACTERISTIC_UUID);
+        if (packet) this.applyHelmetState(packet, nowS);
       } catch {
-        continue;
+        // A missed read leaves the last notified button state in place.
       }
     }
     for (const packet of await this.radio.takeNotifications(SENSOR_CHARACTERISTIC_UUID)) {
@@ -160,6 +156,23 @@ export class HelmetLink {
       }
     }
     this.expireHeading(nowS);
+  }
+
+  private applyHelmetState(packet: Uint8Array, nowS: number): void {
+    try {
+      const state = decodeHelmetState(packet);
+      this.buttons = state.buttons;
+      if (state.headingValid) {
+        this.headingDeg = state.headingDecidegrees / 10;
+        this.headingAtS = nowS;
+      } else {
+        this.headingDeg = null;
+        this.headingAgeS = null;
+        this.headingAtS = null;
+      }
+    } catch {
+      // A bad packet leaves the last good button state in place.
+    }
   }
 
   private acceptAudio(packet: AudioPacket): void {

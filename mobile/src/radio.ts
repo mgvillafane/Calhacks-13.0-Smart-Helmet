@@ -12,6 +12,7 @@ type Device = {
   serviceUUIDs: string[] | null;
   discoverAllServicesAndCharacteristics: () => Promise<Device>;
   writeCharacteristicWithoutResponseForService: (service: string, characteristic: string, value: string) => Promise<unknown>;
+  readCharacteristicForService: (service: string, characteristic: string) => Promise<Characteristic>;
   monitorCharacteristicForService: (
     service: string,
     characteristic: string,
@@ -111,6 +112,12 @@ export async function createPhoneRadio(): Promise<Radio> {
           notes.set(characteristicUuid, bucket);
         }),
       );
+    },
+    async read(characteristicUuid: string) {
+      if (!device) throw new Error("helmet is not connected");
+      const characteristic = await device.readCharacteristicForService(SERVICE_UUID, characteristicUuid);
+      if (!characteristic?.value) return null;
+      return base64ToBytes(characteristic.value);
     },
     async takeNotifications(characteristicUuid: string) {
       const ready = notes.get(characteristicUuid) ?? [];

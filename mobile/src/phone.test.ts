@@ -11,6 +11,7 @@ import { helmetScanPermissions } from "./scanPermissions";
 import {
   AUDIO_CHARACTERISTIC_UUID,
   AUDIO_MAX_SAMPLES,
+  BUTTON_PRESSED,
   BUTTON_TALK,
   DIRECTION_FRONT,
   DIRECTION_LEFT,
@@ -246,13 +247,36 @@ describe("phone navigator", () => {
     await link.connect({ name: "SmartHelmet", address: "bb" });
     await link.poll(0);
     assert.equal(link.talk, true);
-    assert.equal(link.buttonPressed, false);
+    assert.equal(link.buttonPressed, true);
     const louder = amplifyPcm16(Uint8Array.of(0xe8, 0x03, 0x20, 0x4e), 4);
     assert.equal(new DataView(louder.buffer).getInt16(0, true), 4000);
     assert.equal(new DataView(louder.buffer).getInt16(2, true), 32767);
     const pcm = new Int16Array(link.takeAudio().buffer);
     assert.deepEqual([...pcm], [988, 988, 988, 988, 0, 0, -988, -988]);
     assert.equal(link.takeAudio().length, 0);
+  });
+
+  it("reads a held helmet button when the notify was missed", async () => {
+    const link = new HelmetLink({
+      async scan() {
+        return [{ name: "SmartHelmet", address: "bb" }];
+      },
+      async connect() {},
+      async disconnect() {},
+      async subscribe() {},
+      async writeWithoutResponse() {},
+      async takeNotifications() {
+        return [];
+      },
+      async read(uuid) {
+        if (uuid !== HELMET_STATE_CHARACTERISTIC_UUID) return null;
+        return Uint8Array.from([0xff, 0xff, 0x00, BUTTON_PRESSED]);
+      },
+    });
+    await link.connect({ name: "SmartHelmet", address: "bb" });
+    await link.poll(0);
+    assert.equal(link.buttonPressed, true);
+    assert.equal(link.talk, false);
   });
 
   it("shows a live GPS fix and explains a missing one", () => {

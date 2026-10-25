@@ -235,7 +235,7 @@ static void notifySensors(void) {
     }
 }
 
-static void notifyHelmetState(void) {
+static void publishHelmetState(bool notify) {
     ImuSample sample;
     uint16_t decidegrees = 0;
     HelmetState state;
@@ -246,9 +246,13 @@ static void notifyHelmetState(void) {
         return;
     }
     helmetStateCharacteristic->setValue(packet, HELMET_STATE_PACKET_LEN);
-    if (clientConnected) {
+    if (notify && clientConnected) {
         helmetStateCharacteristic->notify();
     }
+}
+
+static void notifyHelmetState(void) {
+    publishHelmetState(true);
 }
 
 // Runs in its own task so a slow loop pass (Wi-Fi telemetry, NeoPixels) cannot
@@ -325,6 +329,13 @@ class ServerCallbacks : public BLEServerCallbacks {
     }
 };
 
+class HelmetStateCallbacks : public BLECharacteristicCallbacks {
+    void onRead(BLECharacteristic *characteristic) override {
+        (void)characteristic;
+        publishHelmetState(false);
+    }
+};
+
 class CueCallbacks : public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *characteristic) override {
         auto value = characteristic->getValue();
@@ -386,6 +397,7 @@ void setup(void) {
         HELMET_STATE_CHARACTERISTIC_UUID,
         BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
     );
+    helmetStateCharacteristic->setCallbacks(new HelmetStateCallbacks());
     helmetStateCharacteristic->addDescriptor(new BLE2902());
 
     sensorCharacteristic = service->createCharacteristic(
