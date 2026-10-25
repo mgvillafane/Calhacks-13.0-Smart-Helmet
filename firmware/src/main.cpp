@@ -304,9 +304,8 @@ static void updateTalkSwitch(uint32_t now) {
         changedMs = now;
     }
     if (reading != stable && now - changedMs >= kTalkDebounceMs) {
-        bool streaming = talk_streaming(talkClosed, stable, reading);
         stable = reading;
-        talkClosed = streaming;
+        talkClosed = talk_streaming(stable);
         talkDown = stable;
         notifyHelmetState();
     }

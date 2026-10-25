@@ -24,8 +24,8 @@ typedef struct {
 int16_t mic_pcm16(MicFilter *filter, int32_t slot);
 int32_t mic_louder_slot(int32_t left, int32_t right);
 
-/* A press toggles helmet-mic streaming. Letting go leaves it unchanged. */
-bool talk_streaming(bool streaming, bool was_closed, bool closed);
+/* Hold the switch while speaking. Release ends the turn. */
+bool talk_streaming(bool closed);
 
 #ifdef __cplusplus
 }

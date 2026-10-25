@@ -286,10 +286,8 @@ static void test_mic_removes_dc_and_scales_speech(void) {
     expect(mic_pcm16(&loud, (int32_t)0x80000000) == -32768, "negative overload clips");
     expect(mic_pcm16(NULL, 0x10000000) == 0, "missing filter is silent");
 
-    expect(talk_streaming(false, false, true) == true, "a press starts the helmet mic");
-    expect(talk_streaming(true, true, false) == true, "letting go keeps the helmet mic on");
-    expect(talk_streaming(true, false, true) == false, "the next press stops the helmet mic");
-    expect(talk_streaming(false, true, false) == false, "letting go stays off");
+    expect(talk_streaming(true) == true, "holding the switch streams the helmet mic");
+    expect(talk_streaming(false) == false, "letting go stops the helmet mic");
     expect(mic_louder_slot(0, 5000) == 5000, "right slot is used when left is silent");
     expect(mic_louder_slot(-8000, 100) == -8000, "left slot wins when it is louder");
 }

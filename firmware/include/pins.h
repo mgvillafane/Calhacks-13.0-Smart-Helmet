@@ -8,7 +8,7 @@
 
 #define PIN_BUTTON_MODE 8
 #define PIN_BUTTON_SOS 9
-/* Talk switch to GND. A press toggles the helmet mic; letting go does not. */
+/* Talk switch to GND. Hold it while speaking; release ends the turn. */
 #define PIN_TALK_SWITCH 7
 
 #define PIN_LED_LEFT 10

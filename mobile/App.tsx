@@ -218,7 +218,7 @@ function HelmetScreen() {
         if (pageRef.current === "debug") playHelmetMonitor(audio);
         if (voiceSourceRef.current === "helmet") sendHelmetAudio(audio);
         setButtonPressed(link.buttonPressed);
-        onTalkSwitch(link.talk);
+        onTalkSwitch(link.buttonPressed);
       });
     }, 100);
     return () => clearInterval(timer);

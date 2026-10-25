@@ -2,11 +2,8 @@
 
 #include <stddef.h>
 
-bool talk_streaming(bool streaming, bool was_closed, bool closed) {
-    if (closed && !was_closed) {
-        return !streaming;
-    }
-    return streaming;
+bool talk_streaming(bool closed) {
+    return closed;
 }
 
 int32_t mic_louder_slot(int32_t left, int32_t right) {
