@@ -11,7 +11,7 @@ import { demoLeftTurn } from "./src/demo";
 import { distanceM, LatLng } from "./src/geo";
 import { CueEngine, Fix, Route, fixAlong } from "./src/engine";
 import { GoFilm } from "./src/GoFilm";
-import { GpsReading, gpsStatus, readingFromCoords } from "./src/gps";
+import { GPS_INTERVAL_MS, GpsReading, gpsStatus, leadSeconds, predictReading, readingFromCoords } from "./src/gps";
 import { BluetoothIcon, BugIcon, CheckIcon, ChevronLeftIcon, CueArrow, GearIcon, HelmetArt, MiniVehicle, MUTED, PersonIcon, PinIcon, RiderBadge, SURFACE, SwapIcon, TargetIcon, VehicleKind, YELLOW } from "./src/icons";
 import { HelmetLink } from "./src/link";
 import { createPhoneRadio } from "./src/radio";
@@ -136,7 +136,7 @@ function HelmetScreen() {
         const last = await Location.getLastKnownPositionAsync();
         if (last && !cancelled) acceptGps(last);
         subscription = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 0 },
+          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: GPS_INTERVAL_MS, distanceInterval: 0 },
           (position) => {
             if (!cancelled) acceptGps(position);
           },
@@ -270,9 +270,10 @@ function HelmetScreen() {
   }
 
   function fixFromGps(reading: GpsReading): Fix {
+    const here = predictReading(reading, leadSeconds(reading.atMs, Date.now()));
     return {
-      lat: reading.lat,
-      lng: reading.lng,
+      lat: here.lat,
+      lng: here.lng,
       speedMps: reading.speedMps,
       gpsCourseDeg: reading.courseDeg,
       helmetHeadingDeg: reading.speedMps < 2 ? linkRef.current?.headingDeg ?? null : null,
@@ -280,7 +281,7 @@ function HelmetScreen() {
   }
 
   function acceptGps(position: Location.LocationObject): void {
-    const reading = readingFromCoords(position.coords);
+    const reading = readingFromCoords(position.coords, position.timestamp);
     gpsRef.current = reading;
     setGpsMessage(gpsStatus(reading, "granted"));
     if (!ridingRef.current) return;
@@ -299,7 +300,6 @@ function HelmetScreen() {
   async function publish(fix: Fix): Promise<void> {
     const link = linkRef.current;
     const now = Date.now() / 1000;
-    if (link?.connected) await link.poll(now);
     const decision = engineRef.current.update(fix);
     const point: LatLng = [fix.lat, fix.lng];
     const previous = lastRidePoint.current;
@@ -380,7 +380,7 @@ function HelmetScreen() {
     }
     try {
       const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High, mayShowUserSettingsDialog: true });
-      const reading = readingFromCoords(position.coords);
+      const reading = readingFromCoords(position.coords, position.timestamp);
       gpsRef.current = reading;
       setGpsMessage(gpsStatus(reading, "granted"));
       return reading;

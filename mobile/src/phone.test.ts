@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { demoLeftTurn, leftCueAtEightyMeters } from "./demo";
-import { gpsStatus, readingFromCoords } from "./gps";
+import { GPS_LEAD_MAX_S, gpsStatus, leadSeconds, predictReading, readingFromCoords } from "./gps";
+import { distanceM } from "./geo";
 import { destinationPoint, nearestPlaces, osmBikeRouteRequest, placeChoices, routeFromOsrm } from "./routing";
 import { planTiles, mercatorTile } from "./tiles";
 import { CueEngine, fixAlong } from "./engine";
@@ -347,10 +348,49 @@ describe("phone navigator", () => {
     assert.equal(link.buttonPressed, false);
   });
 
+  it("moves a late GPS fix ahead to where the rider is now", () => {
+    assert.equal(leadSeconds(10_000, 10_700), 1.2);
+    assert.equal(leadSeconds(null, 10_000), 0.5);
+    assert.equal(leadSeconds(10_000, 9_000), 0.5);
+    assert.equal(leadSeconds(10_000, 60_000), GPS_LEAD_MAX_S);
+
+    const north = readingFromCoords({ latitude: 37.87, longitude: -122.27, speed: 6, heading: 0 }, 10_000);
+    const ahead = predictReading(north, 1);
+    assert.ok(Math.abs(distanceM([north.lat, north.lng], [ahead.lat, ahead.lng]) - 6) < 0.05);
+    assert.ok(ahead.lat > north.lat);
+    assert.equal(ahead.lng, north.lng);
+
+    const east = predictReading(readingFromCoords({ latitude: 37.87, longitude: -122.27, speed: 6, heading: 90 }), 1);
+    assert.ok(east.lng > -122.27);
+
+    const slow = readingFromCoords({ latitude: 37.87, longitude: -122.27, speed: 1, heading: 0 });
+    assert.deepEqual(predictReading(slow, 1), slow);
+    const noCourse = readingFromCoords({ latitude: 37.87, longitude: -122.27, speed: 6, heading: -1 });
+    assert.deepEqual(predictReading(noCourse, 1), noCourse);
+  });
+
+  it("starts the left cue about 12 m sooner from a fix that arrives 1 s late at 8 m/s", () => {
+    const route = demoLeftTurn();
+    function firstCueAt(lead: boolean): number {
+      for (let distance = 0; distance < 100; distance += 1) {
+        const fix = fixAlong(route, distance, 8);
+        const reading = readingFromCoords({ latitude: fix.lat, longitude: fix.lng, speed: 8, heading: fix.gpsCourseDeg }, 0);
+        const here = lead ? predictReading(reading, leadSeconds(0, 1000)) : reading;
+        if (new CueEngine(route).update({ ...fix, lat: here.lat, lng: here.lng }).cue.direction === DIRECTION_LEFT) return distance;
+      }
+      return -1;
+    }
+    const raw = firstCueAt(false);
+    const predicted = firstCueAt(true);
+    assert.equal(raw, 61);
+    assert.ok(raw - predicted >= 12 && raw - predicted <= 13, `raw ${raw} m, predicted ${predicted} m`);
+  });
+
   it("shows a live GPS fix and explains a missing one", () => {
     const reading = readingFromCoords({ latitude: 37.87, longitude: -122.27, accuracy: 8.4, speed: 3.2, heading: 12 });
     assert.equal(gpsStatus(reading, "granted"), "GPS 37.87000, -122.27000 · 8 m accuracy · 3.2 m/s · 12°");
     assert.equal(readingFromCoords({ latitude: 1, longitude: 2, speed: -1, heading: -1 }).courseDeg, null);
+    assert.equal(readingFromCoords({ latitude: 1, longitude: 2 }, 5000).atMs, 5000);
     assert.match(gpsStatus(null, "off"), /location is off/i);
     assert.match(gpsStatus(null, "denied"), /permission was denied/i);
   });
