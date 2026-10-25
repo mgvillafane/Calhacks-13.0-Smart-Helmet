@@ -5,13 +5,15 @@ import { gpsStatus, readingFromCoords } from "./gps";
 import { destinationPoint, nearestPlaces, osmBikeRouteRequest, placeChoices, routeFromOsrm } from "./routing";
 import { planTiles, mercatorTile } from "./tiles";
 import { CueEngine, fixAlong } from "./engine";
-import { debugStopCue, debugTurnCue, micLevel } from "./debug";
+import { debugStopCue, debugTurnCue, helmetButtonNames, micLevel } from "./debug";
 import { advertisementFromScan, HelmetLink } from "./link";
 import { helmetScanPermissions } from "./scanPermissions";
 import {
   AUDIO_CHARACTERISTIC_UUID,
   AUDIO_MAX_SAMPLES,
+  BUTTON_MODE,
   BUTTON_PRESSED,
+  BUTTON_SOS,
   BUTTON_TALK,
   DIRECTION_FRONT,
   DIRECTION_LEFT,
@@ -277,6 +279,72 @@ describe("phone navigator", () => {
     await link.poll(0);
     assert.equal(link.buttonPressed, true);
     assert.equal(link.talk, false);
+  });
+
+  it("shows the MODE and SOS buttons on the debug page without starting voice", async () => {
+    let state = [Uint8Array.from([0xff, 0xff, 0x00, BUTTON_MODE])];
+    const link = new HelmetLink({
+      async scan() {
+        return [];
+      },
+      async connect() {},
+      async disconnect() {},
+      async subscribe() {},
+      async writeWithoutResponse() {},
+      async takeNotifications(uuid) {
+        if (uuid !== HELMET_STATE_CHARACTERISTIC_UUID) return [];
+        const ready = state;
+        state = [];
+        return ready;
+      },
+    });
+    await link.connect({ name: "SmartHelmet", address: "bb" });
+    await link.poll(0);
+    assert.equal(link.buttonPressed, true);
+    assert.equal(link.talk, false);
+    assert.deepEqual(helmetButtonNames(link.buttons), ["Mode"]);
+    state = [Uint8Array.from([0xff, 0xff, 0x00, BUTTON_SOS])];
+    await link.poll(0.1);
+    assert.deepEqual(helmetButtonNames(link.buttons), ["SOS"]);
+    state = [Uint8Array.from([0xff, 0xff, 0x00, 0x00])];
+    await link.poll(0.2);
+    assert.equal(link.buttonPressed, false);
+    assert.deepEqual(helmetButtonNames(link.buttons), []);
+    assert.deepEqual(helmetButtonNames(BUTTON_TALK | BUTTON_PRESSED), ["Talk"]);
+  });
+
+  it("keeps one helmet state read in flight when polls overlap", async () => {
+    let reads = 0;
+    let finish: (packet: Uint8Array) => void = () => {};
+    const link = new HelmetLink({
+      async scan() {
+        return [];
+      },
+      async connect() {},
+      async disconnect() {},
+      async subscribe() {},
+      async writeWithoutResponse() {},
+      async takeNotifications() {
+        return [];
+      },
+      read() {
+        reads += 1;
+        if (reads > 1) return Promise.resolve(Uint8Array.from([0xff, 0xff, 0x00, 0x00]));
+        return new Promise<Uint8Array>((resolve) => {
+          finish = resolve;
+        });
+      },
+    });
+    await link.connect({ name: "SmartHelmet", address: "bb" });
+    const first = link.poll(0);
+    await link.poll(0.1);
+    assert.equal(reads, 1);
+    finish(Uint8Array.from([0xff, 0xff, 0x00, BUTTON_SOS]));
+    await first;
+    assert.equal(link.buttonPressed, true);
+    await link.poll(0.2);
+    assert.equal(reads, 2);
+    assert.equal(link.buttonPressed, false);
   });
 
   it("shows a live GPS fix and explains a missing one", () => {

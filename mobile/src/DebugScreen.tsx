@@ -2,7 +2,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { ChevronLeftIcon, MUTED, SURFACE, YELLOW } from "./icons";
 import { GpsReading, gpsStatus } from "./gps";
 import { SensorSample } from "./protocol";
-import { DebugSide, micLevel } from "./debug";
+import { DebugSide, helmetButtonNames, micLevel } from "./debug";
 
 const BG = "#14161A";
 const TEXT = "#F2F2F0";
@@ -15,7 +15,7 @@ export function DebugScreen({
   sensors,
   holding,
   listening,
-  buttonPressed,
+  buttons,
   monitorOn,
   onBack,
   onConnect,
@@ -32,7 +32,7 @@ export function DebugScreen({
   sensors: SensorSample | null;
   holding: DebugSide | null;
   listening: boolean;
-  buttonPressed: boolean;
+  buttons: number;
   monitorOn: boolean;
   onBack: () => void;
   onConnect: () => void;
@@ -44,6 +44,8 @@ export function DebugScreen({
 }) {
   const imu = sensors?.imuOk ? sensors : null;
   const mic = sensors?.micOk ? sensors.micPeak : null;
+  const pressed = helmetButtonNames(buttons);
+  const buttonPressed = pressed.length > 0;
   return (
     <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
       <View style={styles.head}>
@@ -81,7 +83,7 @@ export function DebugScreen({
       <Text style={styles.label}>HELMET BUTTON</Text>
       {connected ? (
         <View style={[styles.pill, buttonPressed ? styles.pillOn : null, styles.buttonState]}>
-          <Text style={[styles.pillText, buttonPressed ? styles.pillTextOn : null]}>{buttonPressed ? "Pressed" : "Not pressed"}</Text>
+          <Text style={[styles.pillText, buttonPressed ? styles.pillTextOn : null]}>{buttonPressed ? `Pressed: ${pressed.join(", ")}` : "Not pressed"}</Text>
         </View>
       ) : (
         <Text style={styles.body}>Connect the helmet to see the button.</Text>

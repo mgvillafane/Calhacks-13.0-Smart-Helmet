@@ -1,7 +1,6 @@
 import {
   AUDIO_CHARACTERISTIC_UUID,
   AudioPacket,
-  BUTTON_PRESSED,
   BUTTON_TALK,
   CUE_CHARACTERISTIC_UUID,
   Cue,
@@ -57,6 +56,7 @@ export class HelmetLink {
   private lastSentS: number | null = null;
   private audio: Uint8Array[] = [];
   private audioSequence: number | null = null;
+  private reading = false;
 
   constructor(private radio: Radio) {}
 
@@ -65,7 +65,7 @@ export class HelmetLink {
   }
 
   get buttonPressed(): boolean {
-    return (this.buttons & (BUTTON_PRESSED | BUTTON_TALK)) !== 0;
+    return this.buttons !== 0;
   }
 
   takeAudio(): Uint8Array {
@@ -133,12 +133,16 @@ export class HelmetLink {
     for (const packet of await this.radio.takeNotifications(HELMET_STATE_CHARACTERISTIC_UUID)) {
       this.applyHelmetState(packet, nowS);
     }
-    if (this.radio.read) {
+    // Overlapping polls skip the read so queued reads cannot leave the button state seconds behind.
+    if (this.radio.read && !this.reading) {
+      this.reading = true;
       try {
         const packet = await this.radio.read(HELMET_STATE_CHARACTERISTIC_UUID);
         if (packet) this.applyHelmetState(packet, nowS);
       } catch {
         // A missed read leaves the last notified button state in place.
+      } finally {
+        this.reading = false;
       }
     }
     for (const packet of await this.radio.takeNotifications(SENSOR_CHARACTERISTIC_UUID)) {

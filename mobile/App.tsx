@@ -76,7 +76,7 @@ function HelmetScreen() {
   pageRef.current = page;
   const executeRef = useRef<(command: VoiceCommand) => Promise<string>>(async () => "{}");
   const [listening, setListening] = useState(false);
-  const [buttonPressed, setButtonPressed] = useState(false);
+  const [helmetButtons, setHelmetButtons] = useState(0);
   const [monitorOn, setMonitorOn] = useState(false);
   const monitorRef = useRef(false);
   monitorRef.current = monitorOn;
@@ -213,15 +213,15 @@ function HelmetScreen() {
       const link = linkRef.current;
       if (!link?.connected) {
         onTalkSwitch(false);
-        setButtonPressed(false);
+        setHelmetButtons(0);
         return;
       }
       void link.poll(Date.now() / 1000).then(() => {
         const audio = link.takeAudio();
         if (pageRef.current === "debug" && monitorRef.current) playHelmetMonitor(audio);
         if (voiceSourceRef.current === "helmet") sendHelmetAudio(audio);
-        setButtonPressed(link.buttonPressed);
-        onTalkSwitch(link.buttonPressed);
+        setHelmetButtons(link.buttons);
+        onTalkSwitch(link.talk);
       });
     }, 100);
     return () => clearInterval(timer);
@@ -233,12 +233,12 @@ function HelmetScreen() {
       const link = linkRef.current;
       if (!link?.connected) {
         setSensors(null);
-        setButtonPressed(false);
+        setHelmetButtons(0);
         return;
       }
       void link.poll(Date.now() / 1000).then(() => {
         setSensors(link.sensors);
-        setButtonPressed(link.buttonPressed);
+        setHelmetButtons(link.buttons);
       });
     }, 100);
     return () => clearInterval(timer);
@@ -737,7 +737,7 @@ function HelmetScreen() {
             sensors={sensors}
             holding={debugHold}
             listening={listening}
-            buttonPressed={buttonPressed}
+            buttons={helmetButtons}
             monitorOn={monitorOn}
             onBack={closeDebug}
             onConnect={() => void connectHelmet()}
