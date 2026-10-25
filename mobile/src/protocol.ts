@@ -19,6 +19,7 @@ export const FLAG_REROUTING = 1 << 2;
 export const BUTTON_MODE = 1 << 0;
 export const BUTTON_SOS = 1 << 1;
 export const BUTTON_TALK = 1 << 2;
+export const BUTTON_PRESSED = 1 << 3;
 export const HEADING_INVALID = 0xffff;
 
 export const FLAG_IMU_OK = 1 << 0;
@@ -32,7 +33,7 @@ export const SENSOR_CHARACTERISTIC_UUID = "7c1a0004-5e2b-4a6d-8f10-9b3c4d5e6f70"
 export const AUDIO_CHARACTERISTIC_UUID = "7c1a0005-5e2b-4a6d-8f10-9b3c4d5e6f70";
 
 const CUE_FLAG_MASK = FLAG_ARRIVED | FLAG_OFF_ROUTE | FLAG_REROUTING;
-const BUTTON_MASK = BUTTON_MODE | BUTTON_SOS | BUTTON_TALK;
+const BUTTON_MASK = BUTTON_MODE | BUTTON_SOS | BUTTON_TALK | BUTTON_PRESSED;
 const ULAW_BIAS = 0x84;
 const ULAW_CLIP = 32635;
 const SENSOR_FLAG_MASK = FLAG_IMU_OK | FLAG_MIC_OK;

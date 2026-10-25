@@ -53,7 +53,7 @@ void helmet_state_from_heading(int heading_status, uint16_t decidegrees, uint8_t
     if (out == NULL) {
         return;
     }
-    out->buttons = buttons & (BUTTON_MODE | BUTTON_SOS);
+    out->buttons = buttons & BUTTON_MASK;
     if (heading_status == 0 && decidegrees <= 3599) {
         out->heading_decidegrees = decidegrees;
         out->heading_valid = true;

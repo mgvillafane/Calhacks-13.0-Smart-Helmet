@@ -36,6 +36,8 @@ extern "C" {
 #define BUTTON_MODE 0x01u
 #define BUTTON_SOS 0x02u
 #define BUTTON_TALK 0x04u
+#define BUTTON_PRESSED 0x08u
+#define BUTTON_MASK (BUTTON_MODE | BUTTON_SOS | BUTTON_TALK | BUTTON_PRESSED)
 
 #define FLAG_IMU_OK 0x01u
 #define FLAG_MIC_OK 0x02u

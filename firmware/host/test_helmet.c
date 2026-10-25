@@ -261,6 +261,8 @@ static void test_unusable_imu_publishes_the_invalid_sentinel(void) {
     expect(memcmp(packet, invalid_sos, HELMET_STATE_PACKET_LEN) == 0, "invalid heading keeps SOS");
 
     expect(heading_decidegrees(&north, &decidegrees) == 0, "north status");
+    helmet_state_from_heading(0, decidegrees, BUTTON_PRESSED, &state);
+    expect(state.buttons == BUTTON_PRESSED, "a held talk switch stays in the notify");
     helmet_state_from_heading(0, decidegrees, 0, &state);
     expect(encode_helmet_state(&state, packet) == 0, "encode north");
     expect(memcmp(packet, north_packet, HELMET_STATE_PACKET_LEN) == 0, "north notify bytes");

@@ -47,7 +47,7 @@ int encode_helmet_state(const HelmetState *state, uint8_t out[HELMET_STATE_PACKE
     if (reject_null(state) || reject_null(out)) {
         return -1;
     }
-    if ((state->buttons & ~(BUTTON_MODE | BUTTON_SOS | BUTTON_TALK)) != 0) {
+    if ((state->buttons & ~BUTTON_MASK) != 0) {
         return -1;
     }
     if (state->heading_valid) {
@@ -69,7 +69,7 @@ int decode_helmet_state(const uint8_t *packet, size_t length, HelmetState *out) 
     if (reject_null(packet) || reject_null(out) || length != HELMET_STATE_PACKET_LEN) {
         return -1;
     }
-    if (packet[2] > 1u || (packet[3] & ~(BUTTON_MODE | BUTTON_SOS | BUTTON_TALK)) != 0) {
+    if (packet[2] > 1u || (packet[3] & ~BUTTON_MASK) != 0) {
         return -1;
     }
     heading = (uint16_t)(packet[0] | ((uint16_t)packet[1] << 8));

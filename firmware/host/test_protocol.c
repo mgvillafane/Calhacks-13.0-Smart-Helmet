@@ -88,7 +88,7 @@ static void test_helmet_state_golden_packets(void) {
 static void test_helmet_state_rejects(void) {
     HelmetState too_far = {3600, true, 0};
     HelmetState mismatched = {900, false, 0};
-    HelmetState bad_button = {0, true, 0x08};
+    HelmetState bad_button = {0, true, 0x10};
     uint8_t sentinel_marked_valid[] = {0xFF, 0xFF, 0x01, 0x00};
     uint8_t packet[HELMET_STATE_PACKET_LEN];
     HelmetState decoded;

@@ -1,6 +1,7 @@
 import {
   AUDIO_CHARACTERISTIC_UUID,
   AudioPacket,
+  BUTTON_PRESSED,
   BUTTON_TALK,
   CUE_CHARACTERISTIC_UUID,
   Cue,
@@ -60,6 +61,10 @@ export class HelmetLink {
 
   get talk(): boolean {
     return (this.buttons & BUTTON_TALK) !== 0;
+  }
+
+  get buttonPressed(): boolean {
+    return (this.buttons & BUTTON_PRESSED) !== 0;
   }
 
   takeAudio(): Uint8Array {

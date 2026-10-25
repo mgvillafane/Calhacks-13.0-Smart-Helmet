@@ -88,6 +88,7 @@ static BLECharacteristic *audioCharacteristic = nullptr;
 static SensorSample latestSensors = {};
 static volatile int32_t micPeak = 0;
 static volatile bool talkClosed = false;
+static volatile bool talkDown = false;
 static Cue activeCue = {DIRECTION_NONE, 0, 0, 0, 0};
 static uint32_t cueReceivedMs = 0;
 static bool cueFresh = false;
@@ -106,6 +107,9 @@ static uint8_t readButtons(void) {
     }
     if (talkClosed) {
         buttons |= BUTTON_TALK;
+    }
+    if (talkDown) {
+        buttons |= BUTTON_PRESSED;
     }
     return buttons;
 }
@@ -302,10 +306,9 @@ static void updateTalkSwitch(uint32_t now) {
     if (reading != stable && now - changedMs >= kTalkDebounceMs) {
         bool streaming = talk_streaming(talkClosed, stable, reading);
         stable = reading;
-        if (streaming != talkClosed) {
-            talkClosed = streaming;
-            notifyHelmetState();
-        }
+        talkClosed = streaming;
+        talkDown = stable;
+        notifyHelmetState();
     }
 }
 

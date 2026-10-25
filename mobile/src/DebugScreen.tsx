@@ -15,6 +15,7 @@ export function DebugScreen({
   sensors,
   holding,
   listening,
+  buttonPressed,
   onBack,
   onConnect,
   onLeft,
@@ -29,6 +30,7 @@ export function DebugScreen({
   sensors: SensorSample | null;
   holding: DebugSide | null;
   listening: boolean;
+  buttonPressed: boolean;
   onBack: () => void;
   onConnect: () => void;
   onLeft: () => void;
@@ -70,6 +72,15 @@ export function DebugScreen({
         <Pressable style={styles.ghost} onPress={onConnect}>
           <Text style={styles.ghostText}>Connect helmet</Text>
         </Pressable>
+      )}
+
+      <Text style={styles.label}>HELMET BUTTON</Text>
+      {connected ? (
+        <View style={[styles.pill, buttonPressed ? styles.pillOn : null, styles.buttonState]}>
+          <Text style={[styles.pillText, buttonPressed ? styles.pillTextOn : null]}>{buttonPressed ? "Pressed" : "Not pressed"}</Text>
+        </View>
+      ) : (
+        <Text style={styles.body}>Connect the helmet to see the button.</Text>
       )}
 
       <Text style={styles.label}>IMU</Text>
@@ -121,6 +132,7 @@ const styles = StyleSheet.create({
   note: { color: MUTED, fontSize: 14, lineHeight: 19 },
   row: { flexDirection: "row", gap: 10 },
   pill: { flex: 1, minHeight: 56, borderRadius: 16, backgroundColor: SURFACE, alignItems: "center", justifyContent: "center" },
+  buttonState: { flex: 0, alignSelf: "flex-start", paddingHorizontal: 22 },
   pillOn: { backgroundColor: YELLOW },
   pillText: { color: TEXT, fontWeight: "800", fontSize: 16 },
   pillTextOn: { color: BG },

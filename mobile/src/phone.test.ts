@@ -246,6 +246,7 @@ describe("phone navigator", () => {
     await link.connect({ name: "SmartHelmet", address: "bb" });
     await link.poll(0);
     assert.equal(link.talk, true);
+    assert.equal(link.buttonPressed, false);
     const louder = amplifyPcm16(Uint8Array.of(0xe8, 0x03, 0x20, 0x4e), 4);
     assert.equal(new DataView(louder.buffer).getInt16(0, true), 4000);
     assert.equal(new DataView(louder.buffer).getInt16(2, true), 32767);
