@@ -78,30 +78,31 @@ export function CueArrow({ direction, color, size = 22 }: { direction: "left" | 
   );
 }
 
-export function MiniVehicle({ kind, size = 22, color = INK }: { kind: VehicleKind; size?: number; color?: string }) {
+const BICYCLE_GLYPH = { w: 237, h: 174, d: "M42.6 170.9 C24.4 166.6 7.9 149.5 3.4 130.3 C-6.1 90.1 33.9 53.7 72.8 67.1 C76.7 68.5 80.0 69.4 80.0 69.2 C80.0 68.9 77.0 60.7 73.4 51.0 L66.7 33.2 L59.9 32.8 C51.6 32.4 49.0 30.5 49.0 25.0 C49.0 18.3 50.1 18.0 71.6 18.0 C91.4 18.0 92.0 18.1 93.9 21.8 C96.7 27.2 92.1 33.0 84.9 33.0 C83.6 33.0 83.0 33.5 83.2 34.3 C89.8 52.9 97.7 72.9 98.5 72.7 C99.0 72.5 109.0 64.5 120.7 54.9 L141.8 37.5 L141.9 27.2 L142.0 17.0 L129.4 17.0 C113.7 17.0 111.0 15.9 111.0 9.3 C111.0 2.5 112.7 2.0 133.5 2.0 C158.3 2.0 157.0 0.8 157.0 23.2 L157.0 39.5 L162.2 52.8 C166.9 64.5 167.7 66.0 169.5 65.5 C184.0 61.5 204.3 67.0 216.5 78.2 C239.6 99.3 240.6 134.8 218.6 156.5 C207.8 167.2 196.0 172.0 180.4 172.0 C129.1 172.1 106.9 107.1 147.6 76.0 L153.7 71.3 L150.5 63.2 C148.7 58.8 146.9 54.7 146.6 54.1 C146.2 53.5 140.8 57.4 133.2 63.7 C116.7 77.6 102.6 89.4 102.2 89.6 C102.0 89.7 103.0 92.1 104.4 94.9 C111.9 109.6 111.8 127.5 104.2 143.0 C98.3 155.1 82.2 167.9 69.0 170.9 C63.6 172.2 48.0 172.1 42.6 170.9 Z M62.0 156.9 C74.8 154.9 86.3 146.2 91.7 134.6 C94.1 129.3 94.5 127.3 94.5 119.0 C94.5 110.0 92.2 99.9 90.2 100.0 C89.8 100.0 82.6 105.9 74.1 113.0 C57.6 126.9 55.6 127.8 51.3 123.8 C48.5 121.2 48.3 116.4 50.8 113.4 C51.7 112.3 58.7 106.2 66.3 100.0 C73.9 93.8 79.9 88.2 79.7 87.6 C79.1 85.8 68.9 81.1 63.0 79.9 C46.4 76.4 27.8 86.2 20.4 102.3 C16.0 111.7 16.2 125.7 20.7 135.1 C26.2 146.2 37.5 154.9 49.2 156.9 C52.1 157.4 54.7 157.8 55.0 157.9 C55.3 157.9 58.4 157.5 62.0 156.9 Z M194.8 154.8 C216.0 146.9 225.7 121.3 215.3 100.7 C208.3 86.8 190.2 76.9 176.6 79.4 L173.2 80.1 L180.6 98.5 C188.8 119.1 189.2 120.9 185.4 123.9 C178.4 129.4 175.8 126.6 167.0 104.6 C163.0 94.4 159.3 86.0 158.8 86.0 C156.6 86.0 148.7 94.9 146.0 100.4 C130.0 133.1 160.7 167.4 194.8 154.8 Z" };
+const SCOOTER_GLYPH = { w: 217, h: 159, d: "M23.1 155.9 C-2.6 151.2 -5.6 114.2 19.2 105.4 C32.3 100.8 47.8 107.5 52.2 119.8 L53.4 123.0 L96.1 123.0 L138.7 123.0 L139.3 118.8 C140.2 111.9 146.6 100.4 153.0 94.1 C158.2 89.0 169.7 82.0 172.9 82.0 C173.6 82.0 173.8 81.1 173.5 79.8 C173.0 77.6 168.9 51.8 165.1 27.5 L163.4 16.5 L145.7 16.2 L128.0 16.0 L128.0 9.0 L128.0 2.0 L149.1 2.0 L170.2 2.0 L173.0 4.9 C176.7 8.6 175.3 1.1 188.2 83.6 L191.4 103.7 L195.8 104.9 C219.1 111.1 221.6 143.3 199.7 153.9 C183.1 161.9 162.0 148.6 162.0 130.0 C162.0 122.0 168.4 110.9 175.0 107.5 C177.6 106.1 177.7 105.9 176.9 101.4 C175.7 95.3 176.0 95.3 170.0 98.6 C159.4 104.4 152.9 115.4 152.2 128.6 L151.7 137.0 L102.9 137.0 L54.0 137.0 L52.6 140.3 C48.0 151.3 35.2 158.1 23.1 155.9 Z" };
+
+export function vehicleGlyphSpec(kind: VehicleKind) {
+  return kind === "scooter" ? SCOOTER_GLYPH : BICYCLE_GLYPH;
+}
+
+export function VehicleGlyph({ kind, width = 24, color = PAPER }: { kind: VehicleKind; width?: number; color?: string }) {
+  const spec = vehicleGlyphSpec(kind);
+  const height = width * (spec.h / spec.w);
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      {kind === "scooter" ? (
-        <>
-          <Circle cx="6" cy="17" r="2.5" stroke={color} strokeWidth={1.8} />
-          <Circle cx="18" cy="17" r="2.5" stroke={color} strokeWidth={1.8} />
-          <Path d="M6 17 H14 M8 14 H13 M14 17 L17 8 H21" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-        </>
-      ) : (
-        <>
-          <Circle cx="6" cy="16" r="3" stroke={color} strokeWidth={1.8} />
-          <Circle cx="18" cy="16" r="3" stroke={color} strokeWidth={1.8} />
-          <Path d="M6 16 H10 L12 10 H16 M10 16 L12 10 M15 9 H20 M14 10 L18 16" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-        </>
-      )}
+    <Svg width={width} height={height} viewBox={`0 0 ${spec.w} ${spec.h}`}>
+      <Path d={spec.d} fill={color} fillRule="evenodd" />
     </Svg>
   );
+}
+
+export function MiniVehicle({ kind, size = 22, color = INK }: { kind: VehicleKind; size?: number; color?: string }) {
+  return <VehicleGlyph kind={kind} width={size} color={color} />;
 }
 
 export function RiderBadge({ kind, size = 64 }: { kind: VehicleKind; size?: number }) {
   return (
     <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: PAPER, borderWidth: Math.max(3, size * 0.06), borderColor: BLUE, alignItems: "center", justifyContent: "center" }}>
-      <MiniVehicle kind={kind} size={size * 0.58} color="#1E1245" />
+      <VehicleGlyph kind={kind} width={size * 0.74} color="#1E1245" />
     </View>
   );
 }

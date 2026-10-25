@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Dimensions, Easing, Keyboard, KeyboardEvent, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import Svg, { Rect, Text as SvgText } from "react-native-svg";
+import Svg, { Circle, Line, Rect, Text as SvgText } from "react-native-svg";
 import { initialWindowMetrics, SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { requestRecordingPermissionsAsync, useAudioStream } from "expo-audio";
 import { StatusBar } from "expo-status-bar";
@@ -78,6 +78,9 @@ function HelmetScreen() {
   const [pillWidth, setPillWidth] = useState(0);
   const scanningRef = useRef(false);
   const swapTurn = useRef(new Animated.Value(0)).current;
+  const slashOpacity = useRef(new Animated.Value(1)).current;
+  const goReveal = useRef(new Animated.Value(0)).current;
+  const searchPulse = useRef(new Animated.Value(1)).current;
   const debugHoldRef = useRef<DebugSide | null>(null);
   const [debugHold, setDebugHold] = useState<DebugSide | null>(null);
   const [sensors, setSensors] = useState<SensorSample | null>(null);
@@ -586,8 +589,46 @@ function HelmetScreen() {
   const showGo = page === "search" && screen.phase === "preview" && !typing && !listening;
   const notice = linkNote || (!listening && voiceNote ? voiceNote : "") || (quietStatus(status) ? "" : status);
   const swapSpin = swapTurn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] });
-  const locationLabel = flipped ? "Where to?" : "Your location";
-  const destinationLabel = flipped ? "Your location" : "Where to?";
+  const rowDown = swapTurn.interpolate({ inputRange: [0, 1], outputRange: [0, 54] });
+  const rowUp = swapTurn.interpolate({ inputRange: [0, 1], outputRange: [0, -54] });
+  const goLift = goReveal.interpolate({ inputRange: [0, 1], outputRange: [8, 0] });
+  const pillPulse = searchPulse.interpolate({ inputRange: [0.28, 1], outputRange: [0.55, 1] });
+  useEffect(() => {
+    if (helmetPhase !== "searching") {
+      searchPulse.stopAnimation();
+      searchPulse.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(searchPulse, { toValue: 0.28, duration: 620, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(searchPulse, { toValue: 1, duration: 620, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [helmetPhase, searchPulse]);
+  useEffect(() => {
+    Animated.timing(slashOpacity, {
+      toValue: helmetPhase === "on" ? 0 : 1,
+      duration: 160,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [helmetPhase, slashOpacity]);
+  useEffect(() => {
+    if (!showGo) {
+      goReveal.setValue(0);
+      return;
+    }
+    goReveal.setValue(0);
+    Animated.timing(goReveal, {
+      toValue: 1,
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [showGo, goReveal]);
   const connectLabel = helmetPhase === "on" ? "Helmet connected" : helmetPhase === "searching" ? "Searching…" : "Connect helmet";
 
   return (
@@ -631,11 +672,11 @@ function HelmetScreen() {
             <Text style={styles.sectionLabel}>I RIDE A</Text>
             <View style={styles.pillRow}>
               <Pressable style={[styles.choicePill, vehicle === "bicycle" ? styles.choiceOn : null]} onPress={() => setVehicle("bicycle")}>
-                <MiniVehicle kind="bicycle" color={vehicle === "bicycle" ? BG : TEXT} />
+                <MiniVehicle kind="bicycle" size={34} color={vehicle === "bicycle" ? BG : TEXT} />
                 <Text style={[styles.choicePillText, vehicle === "bicycle" ? styles.choiceTextOn : null]}>Bicycle</Text>
               </Pressable>
               <Pressable style={[styles.choicePill, vehicle === "scooter" ? styles.choiceOn : null]} onPress={() => setVehicle("scooter")}>
-                <MiniVehicle kind="scooter" color={vehicle === "scooter" ? BG : TEXT} />
+                <MiniVehicle kind="scooter" size={34} color={vehicle === "scooter" ? BG : TEXT} />
                 <Text style={[styles.choicePillText, vehicle === "scooter" ? styles.choiceTextOn : null]}>Scooter</Text>
               </Pressable>
             </View>
@@ -697,26 +738,39 @@ function HelmetScreen() {
             ) : (
               <>
                 <View style={styles.topBar}>
-                  <Pressable
-                    style={styles.connect}
-                    onPress={() => void connectHelmet()}
-                    disabled={helmetPhase === "searching"}
-                    accessibilityLabel={connectLabel}
-                    accessibilityState={{ selected: helmetPhase === "on" }}
-                  >
-                    <BluetoothIcon size={20} />
-                    <Text style={styles.connectText} numberOfLines={1}>{connectLabel}</Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.helmetButton}
-                    onPress={() => void connectHelmet()}
-                    disabled={helmetPhase === "searching"}
-                    accessibilityLabel={helmetPhase === "on" ? "Helmet connected" : "Helmet disconnected"}
-                    accessibilityState={{ selected: helmetPhase === "on" }}
-                  >
-                    <HelmetArt width={34} tone="light" />
-                    {helmetPhase === "on" ? null : <View style={styles.helmetSlash} />}
-                  </Pressable>
+                  <Animated.View style={{ flex: 1, height: 52, opacity: pillPulse }}>
+                    <Pressable
+                      style={styles.connect}
+                      onPress={() => void connectHelmet()}
+                      disabled={helmetPhase === "searching"}
+                      accessibilityLabel={connectLabel}
+                      accessibilityState={{ selected: helmetPhase === "on" }}
+                    >
+                      <BluetoothIcon size={20} />
+                      <Text style={styles.connectText} numberOfLines={1}>{connectLabel}</Text>
+                    </Pressable>
+                  </Animated.View>
+                  <View style={styles.helmetSlot}>
+                    <Pressable
+                      style={styles.helmetButton}
+                      onPress={() => void connectHelmet()}
+                      disabled={helmetPhase === "searching"}
+                      accessibilityLabel={helmetPhase === "on" ? "Helmet connected" : "Helmet disconnected"}
+                      accessibilityState={{ selected: helmetPhase === "on" }}
+                    >
+                      <Animated.View pointerEvents="none" style={[styles.helmetRing, { opacity: searchPulse }]}>
+                        <Svg width={52} height={52} viewBox="0 0 52 52">
+                          <Circle cx={26} cy={26} r={25} stroke={MUTED} strokeWidth={2} strokeDasharray="4 3" strokeDashoffset={3.6} fill="none" />
+                        </Svg>
+                      </Animated.View>
+                      <HelmetArt width={34} tone="light" />
+                      <Animated.View pointerEvents="none" style={[styles.helmetSlash, { opacity: slashOpacity }]}>
+                        <Svg width={52} height={52} viewBox="0 0 52 52">
+                          <Line x1={6.2} y1={6.2} x2={45.8} y2={45.8} stroke={MUTED} strokeWidth={3} strokeLinecap="butt" />
+                        </Svg>
+                      </Animated.View>
+                    </Pressable>
+                  </View>
                   <Pressable style={styles.homeCircle} onPress={openDebug} accessibilityLabel="Debug">
                     <Text style={styles.debugMark}>D</Text>
                   </Pressable>
@@ -726,22 +780,24 @@ function HelmetScreen() {
                 </View>
                 <View style={styles.routeCard}>
                   <View style={styles.markers}>
-                    <View style={styles.originDot} />
+                    <Animated.View style={[styles.originSlot, { transform: [{ translateY: rowDown }] }]}>
+                      <View style={styles.originDot} />
+                    </Animated.View>
                     <View style={styles.markerLine} />
-                    <PinIcon size={16} />
+                    <Animated.View style={[styles.pinSlot, { transform: [{ translateY: rowUp }] }]}>
+                      <PinIcon size={16} />
+                    </Animated.View>
                   </View>
                   <View style={styles.routeFields}>
-                    <View style={styles.fieldRow}>
-                      <Text style={styles.fieldText} numberOfLines={1}>{locationLabel}</Text>
+                    <Animated.View style={[styles.fieldRow, { transform: [{ translateY: rowDown }] }]}>
+                      <Text style={styles.fieldText} numberOfLines={1}>Your location</Text>
                       <Pressable style={styles.iconButton} onPress={() => setFocusNonce((value) => value + 1)} accessibilityLabel="Use current location">
                         <TargetIcon size={20} />
                       </Pressable>
-                    </View>
+                    </Animated.View>
                     <View style={styles.fieldDivider} />
-                    <View style={styles.fieldRow}>
-                      {flipped ? (
-                        <Text style={styles.fieldText} numberOfLines={1}>{destinationLabel}</Text>
-                      ) : listening ? (
+                    <Animated.View style={[styles.fieldRow, { transform: [{ translateY: rowUp }] }]}>
+                      {listening ? (
                         <View style={styles.listeningRow}>
                           <Waveform />
                           <Text style={styles.fieldText}>Listening…</Text>
@@ -751,7 +807,7 @@ function HelmetScreen() {
                           style={styles.searchInput}
                           value={destination}
                           onChangeText={setDestination}
-                          placeholder={destinationLabel}
+                          placeholder="Where to?"
                           placeholderTextColor={TEXT}
                           autoCapitalize="words"
                           returnKeyType="search"
@@ -768,7 +824,7 @@ function HelmetScreen() {
                           <MicIcon size={20} />
                         </Pressable>
                       </View>
-                    </View>
+                    </Animated.View>
                   </View>
                   <Pressable style={styles.swapButton} onPress={pressSwap} accessibilityLabel="Swap route locations">
                     <Animated.View style={{ transform: [{ rotate: swapSpin }] }}>
@@ -798,14 +854,16 @@ function HelmetScreen() {
                 </View>
               ) : null}
               {showGo ? (
-                <Pressable style={styles.go} onPress={pressGo} accessibilityLabel="Go">
-                  <Svg width={104} height={64} viewBox="0 0 104 64">
-                    <Rect width={104} height={64} rx={18} fill="#FFC400" />
-                    <SvgText x={52} y={41} fill="#14161A" fontSize={26} fontWeight="800" textAnchor="middle">
-                      GO
-                    </SvgText>
-                  </Svg>
-                </Pressable>
+                <Animated.View style={[styles.go, { opacity: goReveal, transform: [{ translateY: goLift }] }]}>
+                  <Pressable style={styles.goHit} onPress={pressGo} accessibilityLabel="Go">
+                    <Svg width={104} height={64} viewBox="0 0 104 64">
+                      <Rect width={104} height={64} rx={18} fill="#FFC400" />
+                      <SvgText x={52} y={41} fill="#14161A" fontSize={26} fontWeight="800" textAnchor="middle">
+                        GO
+                      </SvgText>
+                    </Svg>
+                  </Pressable>
+                </Animated.View>
               ) : null}
             </View>
             {page === "ride" ? (
@@ -822,7 +880,7 @@ function HelmetScreen() {
           </View>
         )}
       </View>
-      {departing ? <GoFilm onDone={beginRide} /> : null}
+      {departing ? <GoFilm kind={vehicle} onDone={beginRide} /> : null}
     </View>
   );
 }
@@ -959,14 +1017,18 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: "row", alignItems: "center", gap: 10 },
   connect: { flex: 1, height: 52, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, borderWidth: 2, borderStyle: "dashed", borderColor: MUTED, borderRadius: 26, paddingHorizontal: 12, overflow: "hidden" },
   connectText: { color: TEXT, fontWeight: "700", fontSize: 16 },
-  helmetButton: { width: 52, height: 52, borderRadius: 26, backgroundColor: BG, borderWidth: 2, borderStyle: "dashed", borderColor: MUTED, alignItems: "center", justifyContent: "center" },
-  helmetSlash: { position: "absolute", left: 3, top: 24.5, width: 46, height: 3, borderRadius: 2, backgroundColor: MUTED, transform: [{ rotate: "45deg" }] },
+  helmetSlot: { width: 52, height: 52 },
+  helmetRing: { position: "absolute", left: 0, top: 0, width: 52, height: 52 },
+  helmetButton: { width: 52, height: 52, alignItems: "center", justifyContent: "center" },
+  helmetSlash: { position: "absolute", left: 0, top: 0, width: 52, height: 52 },
   homeCircle: { width: 52, height: 52, borderRadius: 26, backgroundColor: SURFACE, borderWidth: 2, borderColor: "#4A4E54", alignItems: "center", justifyContent: "center" },
   roundButton: { width: 46, height: 46, borderRadius: 23, backgroundColor: SURFACE, alignItems: "center", justifyContent: "center" },
   routeCard: { height: 110, flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 14, paddingRight: 8, backgroundColor: SURFACE, borderRadius: 16, borderWidth: 2, borderColor: "#4A4E54" },
-  markers: { width: 20, height: 106, alignItems: "center", justifyContent: "space-between", paddingVertical: 18 },
-  markerLine: { position: "absolute", top: 32, bottom: 32, width: 2, backgroundColor: "#4A4E54" },
-  routeFields: { flex: 1 },
+  markers: { width: 20, height: 106 },
+  originSlot: { position: "absolute", top: 21, left: 0, right: 0, alignItems: "center" },
+  pinSlot: { position: "absolute", top: 72, left: 0, right: 0, alignItems: "center" },
+  markerLine: { position: "absolute", top: 32, bottom: 32, left: 9, width: 2, backgroundColor: "#4A4E54" },
+  routeFields: { flex: 1, height: 106, overflow: "hidden" },
   fieldRow: { height: 52, flexDirection: "row", alignItems: "center", gap: 6 },
   fieldText: { flex: 1, color: TEXT, fontSize: 16, fontWeight: "500" },
   fieldDivider: { height: 2, backgroundColor: "#4A4E54" },
@@ -984,6 +1046,7 @@ const styles = StyleSheet.create({
   mapRide: { borderRadius: 20, borderWidth: 2, borderColor: "#4A4E54" },
   mapTyping: { flex: 0, height: 120, minHeight: 0 },
   go: { position: "absolute", right: 16, bottom: 16, width: 104, height: 64, zIndex: 2 },
+  goHit: { width: 104, height: 64 },
   tripChip: { position: "absolute", left: 12, top: 12, backgroundColor: SURFACE, borderRadius: 12, borderWidth: 2, borderColor: "#4A4E54", paddingHorizontal: 12, paddingVertical: 8 },
   tripText: { color: TEXT, fontWeight: "700", fontSize: 15 },
   choices: { maxHeight: 220, borderRadius: 16, backgroundColor: SURFACE },
