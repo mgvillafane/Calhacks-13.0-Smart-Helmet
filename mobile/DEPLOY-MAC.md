@@ -61,6 +61,15 @@ cd calhacks/mobile
 
 `android/` is generated on the first deploy. It is not in git.
 
+Create `mobile/.env.local`. Git ignores it, so every laptop needs its own copy:
+
+```bash
+EXPO_PUBLIC_CONVEX_URL=https://polite-bass-640.convex.cloud
+EXPO_PUBLIC_XAI_API_KEY=<xAI key for Grok Voice>
+```
+
+Without the Convex URL the app runs but logs no rides. Without the xAI key, voice says to add it. Expo reads this file when the dev server starts, so restart `./deploy` after changing it.
+
 ## Deploy
 
 From `mobile/`:
