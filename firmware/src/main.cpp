@@ -450,20 +450,31 @@ void loop(void) {
         float gz;
         if (mpuRead(&ax, &ay, &az, &gx, &gy, &gz)) {
             rememberImu(ax, ay, az, gx, gy, gz);
-            Serial.printf("imu,%lu,%.4f,%.4f,%.4f,%.2f,%.2f,%.2f\n", now, ax, ay, az, gx, gy, gz);
             bool wasBraking = braking;
-            braking = brake_update(&brakeState, ax, ay, az, gy, now - lastImuMs) == 1;
+            braking = brake_update(&brakeState, ax, ay, az, gx, gy, gz, now - lastImuMs) == 1;
+            Serial.printf("imu,%lu,%.4f,%.4f,%.4f,%.2f,%.2f,%.2f,%.4f,%.4f,%.4f,%d,%d,%d\n",
+                          now, ax, ay, az, gx, gy, gz, brakeState.linear_g,
+                          brakeState.average_g, brakeState.delta_v_mps,
+                          braking ? 1 : 0, brakeState.ready ? 1 : 0,
+                          brakeState.rotation_blocked ? 1 : 0);
             if (braking && !wasBraking) {
                 brakeStartMs = now;
                 brakePeakG = 0.0f;
             }
-            if (braking && ax - brakeState.gravity_x > brakePeakG) {
-                brakePeakG = ax - brakeState.gravity_x;
+            if (braking && brakeState.linear_g > brakePeakG) {
+                brakePeakG = brakeState.linear_g;
             }
             if (!braking && wasBraking) {
                 brakeCount += 1;
                 telemetry_brake(now - brakeStartMs, brakePeakG);
             }
+        } else {
+            // Do not keep retransmitting a latched brake after the IMU stops responding.
+            if (brakeState.started) {
+                Serial.println("IMU read failed; recalibrating");
+            }
+            brake_reset(&brakeState);
+            braking = false;
         }
         lastImuMs = now;
     }

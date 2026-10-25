@@ -4,6 +4,7 @@
 #include "heading.h"
 #include "mic.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -151,41 +152,100 @@ static void test_blinker_command_copies_direction(void) {
     expect(blinker_command(NULL, 0, true) == BLINKER_OFF, "missing cue is off");
 }
 
-static int feed_brake(BrakeState *state, float ax, float pitch_dps, int samples) {
+static int feed_brake(BrakeState *state, float ax, float ay, float az,
+                      float gx, float gy, float gz, int samples) {
     int braking = 0;
     for (int index = 0; index < samples; index += 1) {
-        braking = brake_update(state, ax, 0.0f, 1.0f, pitch_dps, 20);
+        braking = brake_update(state, ax, ay, az, gx, gy, gz, 20);
     }
     return braking;
 }
 
-static void test_imu_brake_uses_forward_deceleration(void) {
+static void prime_brake(BrakeState *state, float x, float y, float z) {
+    brake_reset(state);
+    expect(feed_brake(state, x, y, z, 0, 0, 0, 50) == 0, "stationary calibration stays quiet");
+    expect(state->ready, "stationary calibration completes");
+}
+
+static void test_imu_brake_is_independent_of_mount_and_sign(void) {
+    const float mounts[][3] = {
+        {0, 0, 1}, {0, 0, -1}, {1, 0, 0}, {-1, 0, 0},
+        {0, 1, 0}, {0, -1, 0}, {0.577350269f, 0.577350269f, 0.577350269f}
+    };
+    for (unsigned mount = 0; mount < sizeof(mounts) / sizeof(mounts[0]); mount += 1) {
+        float x = mounts[mount][0], y = mounts[mount][1], z = mounts[mount][2];
+        /* Cross gravity with a non-parallel vector to get horizontal motion. */
+        float dx = fabsf(z) < 0.9f ? y : 0;
+        float dy = fabsf(z) < 0.9f ? -x : z;
+        float dz = fabsf(z) < 0.9f ? 0 : -y;
+        float length = sqrtf(dx * dx + dy * dy + dz * dz);
+        for (int sign = -1; sign <= 1; sign += 2) {
+            BrakeState state;
+            prime_brake(&state, x, y, z);
+            float scale = (float)sign * 0.12f / length;
+            expect(feed_brake(&state, x + dx * scale, y + dy * scale, z + dz * scale,
+                              0, 0, 0, 7) == 0, "short motion does not trigger");
+            expect(feed_brake(&state, x + dx * scale, y + dy * scale, z + dz * scale,
+                              0, 0, 0, 25) == 1, "gentler motion triggers in every mounting and sign");
+            expect(fabsf(state.average_g - 0.12f) < 0.001f, "rolling average preserves motion magnitude");
+            expect(fabsf(state.delta_v_mps - 0.12f * BRAKE_G_M_S2 * 0.3f) < 0.001f,
+                   "short-window delta-v has metres per second units");
+            expect(feed_brake(&state, x + dx * scale, y + dy * scale, z + dz * scale,
+                              0, 0, 0, 100) == 1, "sustained motion is not absorbed into gravity");
+            expect(feed_brake(&state, x, y, z, 0, 0, 0, 12) == 1, "release waits at least 250 ms");
+            expect(feed_brake(&state, x, y, z, 0, 0, 0, 1) == 0, "quiet samples release the brake");
+        }
+    }
+}
+
+static void test_imu_brake_rejects_bumps_vibration_and_rotation(void) {
     BrakeState state;
-    BrakeState tilted;
-    BrakeState nod;
+    prime_brake(&state, 0, 0, 1);
+    expect(feed_brake(&state, 3, 0, 1, 0, 0, 0, 1) == 0, "single horizontal impact stays quiet");
+    expect(feed_brake(&state, 0, 0, 1, 0, 0, 0, 40) == 0, "impact does not trigger later in the window");
+    expect(feed_brake(&state, 0, 0, 1.8f, 0, 0, 0, 50) == 0, "vertical bumps are excluded");
+    for (int index = 0; index < 200; index += 1) {
+        expect(feed_brake(&state, index % 2 ? -0.3f : 0.3f, 0, 1, 0, 0, 0, 1) == 0,
+               "opposite vibration cancels instead of accumulating speed");
+    }
+    for (int axis = 0; axis < 3; axis += 1) {
+        prime_brake(&state, 0, 0, 1);
+        expect(feed_brake(&state, 0.3f, 0, 1,
+                          axis == 0 ? 90 : 0, axis == 1 ? 90 : 0, axis == 2 ? 90 : 0, 25) == 0,
+               "fast rotation is rejected on every gyro axis");
+        expect(state.rotation_blocked, "rotation rejection is exposed for plotting");
+    }
+    /* Slow, real changes of tilt must not be mistaken for translation. */
+    prime_brake(&state, 0, 0, 1);
+    for (int index = 1; index <= 500; index += 1) {
+        float angle = (float)index * 20.0f * 0.02f * 0.01745329252f;
+        expect(feed_brake(&state, -sinf(angle), 0, cosf(angle), 0, 20, 0, 1) == 0,
+               "gyro gravity tracking rejects slow head tilts");
+    }
+}
 
-    memset(&state, 0, sizeof(state));
-    memset(&tilted, 0, sizeof(tilted));
-    memset(&nod, 0, sizeof(nod));
-
-    expect(brake_update(NULL, 0.4f, 0.0f, 1.0f, 0.0f, 20) == 0, "missing brake state");
-    expect(feed_brake(&state, 0.0f, 0.0f, 10) == 0, "level rest is not braking");
-    expect(feed_brake(&state, 0.30f, 0.0f, 4) == 0, "80 ms is not yet a brake");
-    expect(feed_brake(&state, 0.30f, 0.0f, 1) == 1, "100 ms of deceleration brakes");
-    expect(feed_brake(&state, 0.30f, 0.0f, 100) == 1, "gravity stays put while braking");
-    expect(feed_brake(&state, 0.0f, 0.0f, 9) == 1, "release waits 200 ms");
-    expect(feed_brake(&state, 0.0f, 0.0f, 1) == 0, "calm axis releases the brake");
-
-    memset(&state, 0, sizeof(state));
-    expect(feed_brake(&state, 0.0f, 0.0f, 5) == 0, "prime before a bump");
-    expect(feed_brake(&state, 1.0f, 0.0f, 1) == 0, "one sample is a bump");
-    expect(feed_brake(&state, 0.0f, 0.0f, 1) == 0, "bump does not latch");
-
-    expect(brake_update(&tilted, 0.34f, 0.0f, 0.94f, 0.0f, 20) == 0, "first tilted sample");
-    expect(feed_brake(&tilted, 0.34f, 0.0f, 20) == 0, "a fixed tilt is not braking");
-
-    expect(feed_brake(&nod, 0.0f, 0.0f, 5) == 0, "prime before a nod");
-    expect(feed_brake(&nod, 0.50f, 90.0f, 15) == 0, "a nod is not braking");
+static void test_imu_brake_handles_timing_and_sensor_failure(void) {
+    BrakeState state;
+    expect(brake_update(NULL, 0, 0, 1, 0, 0, 0, 20) == 0, "missing state is quiet");
+    prime_brake(&state, 0, 0, 1);
+    for (int index = 0; index < 30; index += 1) {
+        brake_update(&state, 0, -0.1f, 1, 0, 0, 0, index % 2 ? 27 : 13);
+    }
+    expect(state.braking, "uneven sample intervals still detect mild motion");
+    expect(state.window_ms == BRAKE_WINDOW_MS, "rolling window trims partial old samples");
+    expect(fabsf(state.average_g - 0.1f) < 0.001f, "time weighting is independent of sample spacing");
+    expect(brake_update(&state, 0, -0.1f, 1, 0, 0, 0, 500) == 0, "a sampling gap releases stale brakes");
+    expect(!state.ready, "a gap requires recalibration");
+    prime_brake(&state, 0, 0, 1);
+    feed_brake(&state, 0.12f, 0, 1, 0, 0, 0, 30);
+    expect(state.braking, "prime a brake before sensor failure");
+    expect(brake_update(&state, NAN, 0, 1, 0, 0, 0, 20) == 0, "invalid IMU values release the brake");
+    expect(!state.ready && state.average_g == 0, "invalid readings do not poison later metrics");
+    prime_brake(&state, 0, 0, 1);
+    expect(feed_brake(&state, 0.12f, 0, 1, 0, 0, 0, 30) == 1, "detection recovers after recalibration");
+    feed_brake(&state, 0, 0, 1, 0, 0, 0, 6);
+    feed_brake(&state, 0.05f, 0, 1, 0, 0, 0, 20);
+    expect(feed_brake(&state, 0, 0, 1, 0, 0, 0, 7) == 1, "release timer counts consecutive calm samples");
 }
 
 static void test_level_heading_cardinals(void) {
@@ -299,7 +359,9 @@ int main(void) {
     test_pulse_period_and_stale_cue();
     test_quiet_and_dropped_cues_are_dark();
     test_blinker_command_copies_direction();
-    test_imu_brake_uses_forward_deceleration();
+    test_imu_brake_is_independent_of_mount_and_sign();
+    test_imu_brake_rejects_bumps_vibration_and_rotation();
+    test_imu_brake_handles_timing_and_sensor_failure();
     test_level_heading_cardinals();
     test_tilt_keeps_north();
     test_unusable_imu_publishes_the_invalid_sentinel();

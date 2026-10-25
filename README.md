@@ -12,7 +12,8 @@ in the generation environment. Run ERC and review connections before assembly.
 - Power: FKE8002 USB power bank (regulated 5V), USB breakout, F1 1.5A PTC, SW1 switch.
 - Controller: ESP32-S3-DevKitC-1 (N16R8) on 5V; onboard 3.3V regulator feeds sensors.
 - Navigation: the phone owns GPS and routing. It writes an 8-byte vibration cue to the ESP32-S3 over BLE. The ESP32 notifies heading and button state. No separate GNSS chip.
-- IMU: LSM6DSOX + LIS3MDL 9-DoF breakout, powered at 3.3V and read by I2C.
+- IMU: the current firmware reads an MPU6050 at 3.3V over I2C. The original
+  schematic models an LSM6DSOX + LIS3MDL breakout; that needs a different driver.
 - Microphone: INMP441 I2S breakout at **3.3V only**; L/R tied GND.
 - Motors: 3 x 3V ERM coin motors on a dedicated, preadjusted 3.0V buck rail.
 - Motor switches: 3 x AO3400A (SOT-23 G1/S2/D3), 3 x 100-ohm series
@@ -72,6 +73,63 @@ An iPhone needs Xcode and a free Apple ID. That install lasts about 7 days. A pa
 The Mapbox token must list the Android `applicationId` and the iOS bundle id. The token is not in git. OpenRouteService is not used. Street routes and the map come from OpenStreetMap, with no routing key.
 
 Flash the helmet from `firmware/` with `pio run -t upload` for the `esp32-s3-devkitc-1` environment. The board advertises as `SmartHelmet`.
+
+## Live IMU graph and brake sensitivity
+
+From the repository root, install the plotter's serial dependency and start it:
+
+```powershell
+python -m pip install -r firmware/requirements.txt
+python firmware/imu_live.py --list-ports
+python firmware/imu_live.py --port COM7
+```
+
+Open **http://127.0.0.1:8765**. Replace `COM7` with the ESP32's port. Omitting
+`--port` selects a single Espressif USB device automatically, without selecting
+the blinker Arduino. Close other serial monitors before connecting. Use
+`--csv imu-session.csv` to record the full session, or download the last 30 seconds
+from the graph. `--demo` previews the charts with clearly marked synthetic data.
+The plot also accepts older firmware's raw acceleration and gyro stream; flash
+the updated firmware to see its actual brake decision and motion measurements.
+
+The brake detector learns gravity and gyro bias during **0.5 seconds held still**
+after startup. It follows gravity using all three gyro axes, removes vertical
+acceleration, and integrates the horizontal acceleration vector over **300 ms**.
+This gives a short-window velocity-change magnitude, without assuming a forward
+axis or the sign of the sensor mounting. It is not an absolute speed estimate.
+Individual impacts are capped, opposite vibrations cancel, and rotation faster
+than **35 degrees/second** suppresses new triggers.
+
+Sensitivity is configured in `firmware/include/brake.h`:
+
+| Setting | Value |
+| --- | --- |
+| Turn on | 0.08g rolling average, with sustained horizontal motion for 80 ms |
+| Release | 0.035g, with 250 ms of consecutive calm samples |
+| Integration window | 300 ms |
+| Startup calibration | 500 ms held still |
+
+The lower threshold detects gentler changes than the previous 0.20g detector.
+The rolling window also adds delay; this is not an 80 ms total response time.
+**Without a forward direction or a velocity reference, speeding up and sustained
+sideways acceleration can also activate this motion-based brake estimate.**
+Gravity compensation and head-motion rejection reduce false triggers but do not
+replace a calibrated vehicle-speed signal. A failed IMU read releases the brake
+and requires calibration again.
+
+The ESP32 sends `B` (braking) or `b` (released) over **GPIO12 TX to Arduino RX0**
+at 115200 baud, refreshing every 200 ms. The Arduino sketch in
+`firmware/test_blinker_arduino/` controls the brake strip through **Arduino D8**.
+
+Plot checks: `python -B -m unittest discover -s firmware/host -p test_imu_live.py`.
+The existing C host suite includes mounting, sensitivity, vibration, tilt,
+sampling-gap, and sensor-failure cases for the detector:
+
+```sh
+clang -std=c11 -Wall -Wextra -Werror -I firmware/include firmware/src/actuators.c firmware/src/heading.c firmware/src/protocol.c firmware/src/blinker.c firmware/src/brake.c firmware/src/mic.c firmware/host/test_helmet.c -lm -o helmet-check
+```
+
+Run the resulting `helmet-check` executable to execute those checks.
 
 ## Files
 
