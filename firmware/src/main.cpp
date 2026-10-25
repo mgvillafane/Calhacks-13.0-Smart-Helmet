@@ -292,15 +292,20 @@ static void streamMicrophone(void *unused) {
 
 static void updateTalkSwitch(uint32_t now) {
     static bool reading = false;
+    static bool stable = false;
     static uint32_t changedMs = 0;
     bool closed = digitalRead(PIN_TALK_SWITCH) == LOW;
     if (closed != reading) {
         reading = closed;
         changedMs = now;
     }
-    if (reading != talkClosed && now - changedMs >= kTalkDebounceMs) {
-        talkClosed = reading;
-        notifyHelmetState();
+    if (reading != stable && now - changedMs >= kTalkDebounceMs) {
+        bool streaming = talk_streaming(talkClosed, stable, reading);
+        stable = reading;
+        if (streaming != talkClosed) {
+            talkClosed = streaming;
+            notifyHelmetState();
+        }
     }
 }
 

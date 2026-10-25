@@ -12,7 +12,7 @@ import { distanceM, LatLng } from "./src/geo";
 import { CueEngine, Fix, Route, fixAlong } from "./src/engine";
 import { GoFilm } from "./src/GoFilm";
 import { GpsReading, gpsStatus, readingFromCoords } from "./src/gps";
-import { BluetoothIcon, CheckIcon, ChevronLeftIcon, CueArrow, GearIcon, HelmetArt, MicIcon, MiniVehicle, MUTED, PersonIcon, PinIcon, RiderBadge, SURFACE, SwapIcon, TargetIcon, VehicleKind, YELLOW } from "./src/icons";
+import { BluetoothIcon, CheckIcon, ChevronLeftIcon, CueArrow, GearIcon, HelmetArt, MiniVehicle, MUTED, PersonIcon, PinIcon, RiderBadge, SURFACE, SwapIcon, TargetIcon, VehicleKind, YELLOW } from "./src/icons";
 import { HelmetLink } from "./src/link";
 import { createPhoneRadio } from "./src/radio";
 import { PlaceChoice, routeBetween, searchPlaces } from "./src/routing";
@@ -21,7 +21,7 @@ import { StreetMap } from "./src/StreetMap";
 import { Cue, SensorSample } from "./src/protocol";
 import { VoiceCommand, VOICE_SAMPLE_RATE, prepareMicPcm, voiceKeyConfigured, whatsNextResult } from "./src/voice";
 import { VoiceAgent } from "./src/voiceAgent";
-import { connectGrokVoice, prepareVoiceAudio } from "./src/voiceLive";
+import { connectGrokVoice, playHelmetMonitor, prepareVoiceAudio } from "./src/voiceLive";
 import { convexSink } from "./src/convexSink";
 import { RideRecorder, newSessionKey } from "./src/telemetry";
 
@@ -72,6 +72,8 @@ function HelmetScreen() {
   const voiceReleasedRef = useRef(false);
   const helmetAudioRef = useRef<Uint8Array[]>([]);
   const talkRef = useRef(false);
+  const pageRef = useRef(page);
+  pageRef.current = page;
   const [helmetTalk, setHelmetTalk] = useState(false);
   const executeRef = useRef<(command: VoiceCommand) => Promise<string>>(async () => "{}");
   const [listening, setListening] = useState(false);
@@ -211,8 +213,9 @@ function HelmetScreen() {
         return;
       }
       void link.poll(Date.now() / 1000).then(() => {
-        if (voiceSourceRef.current === "helmet") sendHelmetAudio(link.takeAudio());
-        else link.takeAudio();
+        const audio = link.takeAudio();
+        if (pageRef.current === "debug") playHelmetMonitor(audio);
+        if (voiceSourceRef.current === "helmet") sendHelmetAudio(audio);
         onTalkSwitch(link.talk);
       });
     }, 100);
@@ -516,19 +519,11 @@ function HelmetScreen() {
     return JSON.stringify({ status: "riding", place: place.name });
   }
 
-  async function toggleVoice(): Promise<void> {
-    if (voiceSourceRef.current) {
-      await stopVoice();
-      return;
-    }
-    await startVoice("phone");
-  }
-
   function onTalkSwitch(talk: boolean): void {
     if (talk === talkRef.current) return;
     talkRef.current = talk;
     setHelmetTalk(talk);
-    if (talk && !voiceSourceRef.current) void startVoice("helmet");
+    if (talk && voiceSourceRef.current !== "helmet") void startVoice("helmet");
     if (!talk && voiceSourceRef.current === "helmet") void stopVoice();
   }
 
@@ -541,20 +536,30 @@ function HelmetScreen() {
 
   async function startVoice(source: "phone" | "helmet"): Promise<void> {
     if (voiceSourceRef.current) return;
+    voiceSourceRef.current = source;
+    voiceReleasedRef.current = false;
+    setListening(true);
+    setVoiceNote("Listening");
     const key = process.env.EXPO_PUBLIC_XAI_API_KEY ?? "";
     if (!voiceKeyConfigured(key)) {
+      voiceSourceRef.current = null;
+      setListening(false);
       setVoiceNote("Add EXPO_PUBLIC_XAI_API_KEY in mobile/.env, then restart Expo.");
       return;
     }
     if (source === "phone") {
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
+        voiceSourceRef.current = null;
+        setListening(false);
         setVoiceNote("Microphone permission is off.");
         return;
       }
     }
-    voiceSourceRef.current = source;
-    voiceReleasedRef.current = false;
+    if (voiceReleasedRef.current) {
+      await stopVoice();
+      return;
+    }
     helmetAudioRef.current = [];
     Keyboard.dismiss();
     setChoices([]);
@@ -573,6 +578,7 @@ function HelmetScreen() {
       listeningRef.current = false;
       voiceSourceRef.current = null;
       helmetAudioRef.current = [];
+      setListening(false);
       setVoiceNote(error instanceof Error ? error.message : "Voice failed");
       return;
     }
@@ -581,7 +587,7 @@ function HelmetScreen() {
       return;
     }
     setListening(true);
-    setVoiceNote(source === "phone" ? "Listening. Tap Done when you finish." : "Listening on the helmet mic. Flip the switch off when you finish.");
+    setVoiceNote("Listening");
   }
 
   async function stopVoice(): Promise<void> {
@@ -662,7 +668,7 @@ function HelmetScreen() {
   const routePoints = screen.remaining.length > 1 ? screen.remaining : screen.traveled.concat(screen.remaining);
   const tripMeters = pathMeters(routePoints);
   const showGo = page === "search" && screen.phase === "preview" && !typing && !listening;
-  const notice = linkNote || (!listening && voiceNote ? voiceNote : "") || (quietStatus(status) ? "" : status);
+  const notice = (listening ? "Listening" : "") || linkNote || (voiceNote ? voiceNote : "") || (quietStatus(status) ? "" : status);
   const swapSpin = swapTurn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] });
   const rowDown = swapTurn.interpolate({ inputRange: [0, 1], outputRange: [0, 54] });
   const rowUp = swapTurn.interpolate({ inputRange: [0, 1], outputRange: [0, -54] });
@@ -718,6 +724,7 @@ function HelmetScreen() {
             sensors={sensors}
             holding={debugHold}
             talk={helmetTalk}
+            listening={listening}
             onBack={closeDebug}
             onConnect={() => void connectHelmet()}
             onLeft={() => holdDebug("left")}
@@ -876,7 +883,7 @@ function HelmetScreen() {
                       {listening ? (
                         <View style={styles.listeningRow}>
                           <Waveform />
-                          <Text style={styles.fieldText}>Listening…</Text>
+                          <Text style={styles.fieldText}>Listening</Text>
                         </View>
                       ) : (
                         <TextInput
@@ -890,16 +897,6 @@ function HelmetScreen() {
                           onSubmitEditing={() => void findPlaces()}
                         />
                       )}
-                      <View style={styles.micWrap}>
-                        {listening ? <PulseRings size={40} /> : null}
-                        <Pressable
-                          style={styles.iconButton}
-                          onPress={() => void toggleVoice()}
-                          accessibilityLabel={listening ? "Stop listening" : "Use voice input"}
-                        >
-                          <MicIcon size={20} />
-                        </Pressable>
-                      </View>
                     </Animated.View>
                   </View>
                   <Pressable style={styles.swapButton} onPress={pressSwap} accessibilityLabel="Swap route locations">
@@ -968,51 +965,6 @@ function quietStatus(text: string): boolean {
     || text.startsWith("Riding to")
     || text.startsWith("Playing the left")
     || text.startsWith("Ride north");
-}
-
-function PulseRings({ size, color = TEXT }: { size: number; color?: string }) {
-  const first = useRef(new Animated.Value(0)).current;
-  const second = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const play = (value: Animated.Value, delay: number) => {
-      const loop = Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(value, { toValue: 1, duration: 1400, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-          Animated.timing(value, { toValue: 0, duration: 0, useNativeDriver: true }),
-        ]),
-      );
-      loop.start();
-      return loop;
-    };
-    const one = play(first, 0);
-    const two = play(second, 700);
-    return () => {
-      one.stop();
-      two.stop();
-    };
-  }, [first, second]);
-  const ring = (value: Animated.Value) => (
-    <Animated.View
-      pointerEvents="none"
-      style={{
-        position: "absolute",
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        borderWidth: 2,
-        borderColor: color,
-        opacity: value.interpolate({ inputRange: [0, 1], outputRange: [0.7, 0] }),
-        transform: [{ scale: value.interpolate({ inputRange: [0, 1], outputRange: [1, 1.7] }) }],
-      }}
-    />
-  );
-  return (
-    <View pointerEvents="none" style={{ position: "absolute", width: size, height: size }}>
-      {ring(first)}
-      {ring(second)}
-    </View>
-  );
 }
 
 function Waveform() {
@@ -1111,7 +1063,6 @@ const styles = StyleSheet.create({
   originDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#3DA5FF" },
   searchInput: { flex: 1, color: TEXT, fontSize: 16, fontWeight: "500", paddingVertical: 0 },
   iconButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: BG, borderWidth: 2, borderColor: "#4A4E54", alignItems: "center", justifyContent: "center" },
-  micWrap: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   listeningRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
   wave: { width: 22, height: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   waveBar: { width: 3, height: 16, borderRadius: 2, backgroundColor: TEXT },

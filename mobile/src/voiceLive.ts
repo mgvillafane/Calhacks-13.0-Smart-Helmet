@@ -1,7 +1,7 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from "expo-audio";
 import { File, Paths } from "expo-file-system";
 import { VoiceAgent, VoiceSocket } from "./voiceAgent";
-import { VoiceCommand, VoiceNotice, pcmDurationMs, voiceConnectOptions } from "./voice";
+import { VoiceCommand, VoiceNotice, VOICE_SAMPLE_RATE, pcmDurationMs, voiceConnectOptions, wavFromPcm16 } from "./voice";
 
 type SocketWithHeaders = new (
   url: string,
@@ -11,6 +11,9 @@ type SocketWithHeaders = new (
 
 let player: AudioPlayer | null = null;
 let previous: File | null = null;
+let monitor: AudioPlayer | null = null;
+let monitorFile: File | null = null;
+let monitorChain: Promise<void> = Promise.resolve();
 
 export function connectGrokVoice(
   key: string,
@@ -68,6 +71,12 @@ export function connectGrokVoice(
   });
 }
 
+export function playHelmetMonitor(pcm: Uint8Array): void {
+  if (pcm.length < 2) return;
+  const wav = wavFromPcm16(pcm.slice(), VOICE_SAMPLE_RATE);
+  monitorChain = monitorChain.then(() => playMonitorWav(wav)).catch(() => undefined);
+}
+
 export async function prepareVoiceAudio(): Promise<void> {
   await setAudioModeAsync({
     allowsRecording: true,
@@ -75,6 +84,30 @@ export async function prepareVoiceAudio(): Promise<void> {
     interruptionMode: "duckOthers",
     shouldRouteThroughEarpiece: false,
   });
+}
+
+async function playMonitorWav(wav: Uint8Array): Promise<void> {
+  await prepareVoiceAudio();
+  const file = new File(Paths.cache, `helmet-mic-${Date.now()}.wav`);
+  await file.write(wav);
+  if (!monitor) monitor = createAudioPlayer(file.uri);
+  else monitor.replace(file.uri);
+  try {
+    await monitor.seekTo(0);
+  } catch {
+    // Playback starts at the beginning once the file loads.
+  }
+  monitor.play();
+  const stale = monitorFile;
+  monitorFile = file;
+  if (stale?.exists) {
+    try {
+      stale.delete();
+    } catch {
+      // The next chunk replaces this clip.
+    }
+  }
+  await new Promise((resolve) => setTimeout(resolve, pcmDurationMs(Math.max(0, wav.length - 44))));
 }
 
 async function playWav(wav: Uint8Array): Promise<void> {

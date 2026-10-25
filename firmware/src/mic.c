@@ -2,6 +2,13 @@
 
 #include <stddef.h>
 
+bool talk_streaming(bool streaming, bool was_closed, bool closed) {
+    if (closed && !was_closed) {
+        return !streaming;
+    }
+    return streaming;
+}
+
 int16_t mic_pcm16(MicFilter *filter, int32_t slot) {
     int32_t in = slot >> 8;
     int32_t out;

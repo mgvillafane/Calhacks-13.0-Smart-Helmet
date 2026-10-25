@@ -35,7 +35,7 @@ Left, front, and right each pulse one motor: GPIO 17, 18, and 21. A u-turn alter
 | --- | --- | --- |
 | 0–1 | heading | uint16 decidegrees, 0–3599, or `0xFFFF` when invalid |
 | 2 | valid | 1 when heading is 0–3599, otherwise 0 |
-| 3 | buttons | bit 0 MODE (GPIO 8), bit 1 SOS (GPIO 9), bit 2 TALK switch (GPIO 7), active low |
+| 3 | buttons | bit 0 MODE (GPIO 8), bit 1 SOS (GPIO 9), bit 2 TALK. TALK stays set after a press of GPIO 7 until the next press |
 
 A valid flag must match the heading. The ESP32 notifies this about 5 times a second. Until the IMU is read, heading is the invalid sentinel.
 
@@ -64,4 +64,4 @@ Unknown versions or flag bits are rejected. The ESP32 notifies this about 10 tim
 | 1 | sequence | uint8, +1 per packet, wraps at 255 |
 | 2… | samples | 1–240 G.711 mu-law bytes, 16 kHz mono |
 
-The ESP32 streams the INMP441 here only while the TALK switch is closed and a phone is connected: 16 KB/s, about 67 packets a second. The phone asks for a 247-byte MTU so a full packet fits one notify. A sequence gap is filled with silence so the audio keeps its timing. Closing TALK starts a Grok Voice turn on the phone; opening it sends the turn. Unknown versions or empty packets are rejected.
+The ESP32 streams the helmet INMP441 here while the TALK bit is set and a phone is connected: 16 KB/s, about 67 packets a second. The phone asks for a 247-byte MTU so a full packet fits one notify. A sequence gap is filled with silence so the audio keeps its timing. The first press sets TALK and the phone starts a turn from that helmet audio. The next press clears TALK, and the phone sends the audio and starts the search. Letting go of the switch does not stop the microphone. Unknown versions or empty packets are rejected.
