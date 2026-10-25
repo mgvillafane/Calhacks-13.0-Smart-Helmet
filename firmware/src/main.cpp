@@ -116,6 +116,21 @@ static uint8_t readButtons(void) {
 }
 
 static void writeMotor(int pin, int channel, uint8_t intensity) {
+    // GPIO 18 is the DevKit UART1 RX function. LEDC never took that pin, so the
+    // front gate stayed quiet while left and right PWM still ran. A plain level
+    // turns the MOSFET fully on for the cue's on-phase.
+    if (pin == PIN_MOTOR_FRONT) {
+        static int8_t driven = -1;
+        int8_t level = intensity == 0 ? 0 : 1;
+        (void)channel;
+        if (driven == level) {
+            return;
+        }
+        pinMode(PIN_MOTOR_FRONT, OUTPUT);
+        digitalWrite(PIN_MOTOR_FRONT, level == 0 ? LOW : HIGH);
+        driven = level;
+        return;
+    }
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
     (void)channel;
     ledcWrite(pin, intensity);
@@ -280,17 +295,16 @@ void setup(void) {
 
     pinMode(PIN_BUTTON_MODE, INPUT_PULLUP);
     pinMode(PIN_BUTTON_SOS, INPUT_PULLUP);
+    pinMode(PIN_MOTOR_FRONT, OUTPUT);
+    digitalWrite(PIN_MOTOR_FRONT, LOW);
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
     ledcAttach(PIN_MOTOR_LEFT, 5000, 8);
-    ledcAttach(PIN_MOTOR_FRONT, 5000, 8);
     ledcAttach(PIN_MOTOR_RIGHT, 5000, 8);
 #else
     ledcSetup(kMotorPwmChannelLeft, 5000, 8);
-    ledcSetup(kMotorPwmChannelFront, 5000, 8);
     ledcSetup(kMotorPwmChannelRight, 5000, 8);
     ledcAttachPin(PIN_MOTOR_LEFT, kMotorPwmChannelLeft);
-    ledcAttachPin(PIN_MOTOR_FRONT, kMotorPwmChannelFront);
     ledcAttachPin(PIN_MOTOR_RIGHT, kMotorPwmChannelRight);
 #endif
     // leftStrip.begin();
@@ -333,6 +347,8 @@ void setup(void) {
     BLEDevice::startAdvertising();
     Serial.println("SmartHelmet advertising");
     telemetry_begin();
+    pinMode(PIN_MOTOR_FRONT, OUTPUT);
+    digitalWrite(PIN_MOTOR_FRONT, LOW);
 }
 
 // A turn cue that ran past CUE_STALE_MS without a refresh: the phone link dropped mid-cue.
