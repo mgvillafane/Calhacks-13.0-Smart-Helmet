@@ -12,7 +12,7 @@ import { distanceM, LatLng } from "./src/geo";
 import { CueEngine, Fix, Route, fixAlong } from "./src/engine";
 import { GoFilm } from "./src/GoFilm";
 import { GpsReading, gpsStatus, readingFromCoords } from "./src/gps";
-import { BluetoothIcon, CheckIcon, ChevronLeftIcon, CueArrow, GearIcon, HelmetArt, MiniVehicle, MUTED, PersonIcon, PinIcon, RiderBadge, SURFACE, SwapIcon, TargetIcon, VehicleKind, YELLOW } from "./src/icons";
+import { BluetoothIcon, BugIcon, CheckIcon, ChevronLeftIcon, CueArrow, GearIcon, HelmetArt, MiniVehicle, MUTED, PersonIcon, PinIcon, RiderBadge, SURFACE, SwapIcon, TargetIcon, VehicleKind, YELLOW } from "./src/icons";
 import { HelmetLink } from "./src/link";
 import { createPhoneRadio } from "./src/radio";
 import { PlaceChoice, routeBetween, searchPlaces } from "./src/routing";
@@ -855,7 +855,7 @@ function HelmetScreen() {
                     </Pressable>
                   </View>
                   <Pressable style={styles.homeCircle} onPress={openDebug} accessibilityLabel="Debug">
-                    <Text style={styles.debugMark}>D</Text>
+                    <BugIcon size={26} />
                   </Pressable>
                   <Pressable style={styles.homeCircle} onPress={openSettings} accessibilityLabel="Open settings">
                     <GearIcon size={26} />
@@ -1114,5 +1114,4 @@ const styles = StyleSheet.create({
   note: { flex: 1, color: TEXT, fontSize: 14, lineHeight: 19 },
   footerLinks: { flexDirection: "row", gap: 22, marginTop: 18 },
   footerLink: { color: MUTED, fontWeight: "700", fontSize: 15 },
-  debugMark: { color: TEXT, fontWeight: "800", fontSize: 18 },
 });
