@@ -2,6 +2,9 @@ export const PROTOCOL_VERSION = 1;
 export const CUE_PACKET_LEN = 8;
 export const HELMET_STATE_PACKET_LEN = 4;
 export const SENSOR_PACKET_LEN = 20;
+export const AUDIO_HEADER_LEN = 2;
+export const AUDIO_MAX_SAMPLES = 240;
+export const AUDIO_SAMPLE_RATE = 16000;
 
 export const DIRECTION_NONE = 0;
 export const DIRECTION_LEFT = 1;
@@ -15,6 +18,7 @@ export const FLAG_REROUTING = 1 << 2;
 
 export const BUTTON_MODE = 1 << 0;
 export const BUTTON_SOS = 1 << 1;
+export const BUTTON_TALK = 1 << 2;
 export const HEADING_INVALID = 0xffff;
 
 export const FLAG_IMU_OK = 1 << 0;
@@ -25,9 +29,12 @@ export const SERVICE_UUID = "7c1a0001-5e2b-4a6d-8f10-9b3c4d5e6f70";
 export const CUE_CHARACTERISTIC_UUID = "7c1a0002-5e2b-4a6d-8f10-9b3c4d5e6f70";
 export const HELMET_STATE_CHARACTERISTIC_UUID = "7c1a0003-5e2b-4a6d-8f10-9b3c4d5e6f70";
 export const SENSOR_CHARACTERISTIC_UUID = "7c1a0004-5e2b-4a6d-8f10-9b3c4d5e6f70";
+export const AUDIO_CHARACTERISTIC_UUID = "7c1a0005-5e2b-4a6d-8f10-9b3c4d5e6f70";
 
 const CUE_FLAG_MASK = FLAG_ARRIVED | FLAG_OFF_ROUTE | FLAG_REROUTING;
-const BUTTON_MASK = BUTTON_MODE | BUTTON_SOS;
+const BUTTON_MASK = BUTTON_MODE | BUTTON_SOS | BUTTON_TALK;
+const ULAW_BIAS = 0x84;
+const ULAW_CLIP = 32635;
 const SENSOR_FLAG_MASK = FLAG_IMU_OK | FLAG_MIC_OK;
 
 export type Cue = {
@@ -181,6 +188,54 @@ export function decodeSensorSample(packet: Uint8Array): SensorSample {
     gzDps10: getI16(packet, 12),
     micPeak: getI16(packet, 14),
   };
+}
+
+export type AudioPacket = {
+  sequence: number;
+  pcm: Uint8Array;
+};
+
+export function ulawEncode(sample: number): number {
+  int16("sample", sample);
+  let sign = 0;
+  let magnitude = sample;
+  if (magnitude < 0) {
+    sign = 0x80;
+    magnitude = -magnitude;
+  }
+  magnitude = Math.min(magnitude, ULAW_CLIP) + ULAW_BIAS;
+  let exponent = 7;
+  let mask = 0x4000;
+  while (exponent > 0 && !(magnitude & mask)) {
+    exponent -= 1;
+    mask >>= 1;
+  }
+  const mantissa = (magnitude >> (exponent + 3)) & 0x0f;
+  return ~(sign | (exponent << 4) | mantissa) & 0xff;
+}
+
+export function ulawDecode(value: number): number {
+  const bits = ~value & 0xff;
+  const magnitude = ((((bits & 0x0f) << 3) + ULAW_BIAS) << ((bits >> 4) & 0x07)) - ULAW_BIAS;
+  return bits & 0x80 ? -magnitude : magnitude;
+}
+
+export function encodeAudioPacket(sequence: number, samples: number[]): Uint8Array {
+  uint("sequence", sequence, 255);
+  if (samples.length < 1 || samples.length > AUDIO_MAX_SAMPLES) throw new Error(`audio packet holds 1 to ${AUDIO_MAX_SAMPLES} samples`);
+  return Uint8Array.from([PROTOCOL_VERSION, sequence, ...samples.map(ulawEncode)]);
+}
+
+export function decodeAudioPacket(packet: Uint8Array): AudioPacket {
+  if (packet.length <= AUDIO_HEADER_LEN || packet.length > AUDIO_HEADER_LEN + AUDIO_MAX_SAMPLES) {
+    throw new Error(`audio packet must hold 1 to ${AUDIO_MAX_SAMPLES} samples`);
+  }
+  if (packet[0] !== PROTOCOL_VERSION) throw new Error("unsupported audio version");
+  const count = packet.length - AUDIO_HEADER_LEN;
+  const pcm = new Uint8Array(count * 2);
+  const view = new DataView(pcm.buffer);
+  for (let index = 0; index < count; index += 1) view.setInt16(index * 2, ulawDecode(packet[AUDIO_HEADER_LEN + index]), true);
+  return { sequence: packet[1], pcm };
 }
 
 export function sameBytes(left: Uint8Array | null, right: Uint8Array): boolean {

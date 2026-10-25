@@ -9,6 +9,15 @@ import unittest
 from shared.protocol.codec import (
     BUTTON_MODE,
     BUTTON_SOS,
+    BUTTON_TALK,
+    AUDIO_CHARACTERISTIC_UUID,
+    AUDIO_MAX_SAMPLES,
+    AUDIO_SAMPLE_RATE,
+    AudioPacket,
+    decode_audio_packet,
+    encode_audio_packet,
+    ulaw_decode,
+    ulaw_encode,
     CUE_CHARACTERISTIC_UUID,
     CUE_PACKET_LEN,
     DEVICE_NAME,
@@ -283,7 +292,7 @@ class HelmetStateDecodeTest(unittest.TestCase):
             bytes([0xFF, 0xFF, 0x01, 0x00]),  # sentinel marked valid
             bytes([0x00, 0x00, 0x00, 0x00]),  # zero heading marked invalid
             bytes([0x84, 0x03, 0x02, 0x00]),  # validity byte neither 0 nor 1
-            bytes([0x00, 0x00, 0x01, 0x04]),  # unknown button bit
+            bytes([0x00, 0x00, 0x01, 0x08]),  # unknown button bit
         ):
             with self.assertRaises(ValueError):
                 decode_helmet_state(packet)
@@ -310,8 +319,13 @@ class HelmetStateEncodeRejectTest(unittest.TestCase):
     def test_rejects_unknown_button_bits(self):
         with self.assertRaises(ValueError):
             encode_helmet_state(
-                HelmetState(heading_decidegrees=0, heading_valid=True, buttons=0x04)
+                HelmetState(heading_decidegrees=0, heading_valid=True, buttons=0x08)
             )
+
+    def test_talk_switch_is_button_bit_2(self):
+        packet = encode_helmet_state(HelmetState(heading_decidegrees=0, heading_valid=True, buttons=BUTTON_TALK))
+        self.assertEqual(packet, bytes([0x00, 0x00, 0x01, 0x04]))
+        self.assertEqual(decode_helmet_state(packet).buttons, BUTTON_TALK)
 
 
 class SensorSampleEncodeTest(unittest.TestCase):
@@ -376,6 +390,43 @@ class SensorSampleDecodeTest(unittest.TestCase):
         for packet in (b"", good[:19], good + b"\x00", bytes([0x02]) + good[1:], bytes([0x01, 0x04]) + good[2:]):
             with self.assertRaises(ValueError):
                 decode_sensor_sample(packet)
+
+
+class AudioTest(unittest.TestCase):
+    def test_ulaw_golden_values(self):
+        self.assertEqual(
+            [ulaw_encode(sample) for sample in (0, 1000, -1000, 32767, -32768)],
+            [0xFF, 0xCE, 0x4E, 0x80, 0x00],
+        )
+        self.assertEqual(
+            [ulaw_decode(byte) for byte in (0xFF, 0xCE, 0x4E, 0x80, 0x00)],
+            [0, 988, -988, 32124, -32124],
+        )
+
+    def test_ulaw_round_trip_stays_within_its_step(self):
+        for sample in range(-32124, 32125, 97):
+            decoded = ulaw_decode(ulaw_encode(sample))
+            self.assertLessEqual(abs(decoded - sample), max(16, abs(sample) // 16))
+
+    def test_known_packet_is_version_sequence_then_ulaw(self):
+        packet = encode_audio_packet(5, [0, 1000, -1000])
+        self.assertEqual(packet, bytes([0x01, 0x05, 0xFF, 0xCE, 0x4E]))
+        self.assertEqual(decode_audio_packet(packet), AudioPacket(5, (0, 988, -988)))
+
+    def test_full_packet_fits_a_247_byte_mtu(self):
+        packet = encode_audio_packet(255, [0] * AUDIO_MAX_SAMPLES)
+        self.assertEqual(len(packet), 242)
+        self.assertLessEqual(len(packet), 247 - 3)
+        self.assertEqual(AUDIO_SAMPLE_RATE, 16000)
+        self.assertEqual(AUDIO_CHARACTERISTIC_UUID, "7c1a0005-5e2b-4a6d-8f10-9b3c4d5e6f70")
+
+    def test_rejects_bad_packets(self):
+        for packet in (b"", bytes([0x01, 0x00]), bytes([0x02, 0x00, 0xFF]), bytes([0x01, 0x00]) + bytes(241)):
+            with self.assertRaises(ValueError):
+                decode_audio_packet(packet)
+        for sequence, samples in ((0, []), (256, [0]), (0, [0] * 241), (0, [40000])):
+            with self.assertRaises(ValueError):
+                encode_audio_packet(sequence, samples)
 
 
 if __name__ == "__main__":

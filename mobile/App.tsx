@@ -68,6 +68,11 @@ function HelmetScreen() {
   const lastRidePoint = useRef<LatLng | null>(null);
   const agentRef = useRef<VoiceAgent | null>(null);
   const listeningRef = useRef(false);
+  const voiceSourceRef = useRef<"phone" | "helmet" | null>(null);
+  const voiceReleasedRef = useRef(false);
+  const helmetAudioRef = useRef<Uint8Array[]>([]);
+  const talkRef = useRef(false);
+  const [helmetTalk, setHelmetTalk] = useState(false);
   const executeRef = useRef<(command: VoiceCommand) => Promise<string>>(async () => "{}");
   const [listening, setListening] = useState(false);
   const [voiceNote, setVoiceNote] = useState("");
@@ -90,7 +95,7 @@ function HelmetScreen() {
     encoding: "int16",
     onBuffer: (buffer) => {
       const agent = agentRef.current;
-      if (!listeningRef.current || !agent) return;
+      if (!listeningRef.current || voiceSourceRef.current !== "phone" || !agent) return;
       agent.sendPcm(prepareMicPcm(new Uint8Array(buffer.data), buffer.channels || 1, buffer.sampleRate || VOICE_SAMPLE_RATE));
     },
   });
@@ -196,6 +201,23 @@ function HelmetScreen() {
     }, 1000);
     return () => clearInterval(timer);
   }, [debugHold]);
+
+  useEffect(() => {
+    if (helmetPhase !== "on") return undefined;
+    const timer = setInterval(() => {
+      const link = linkRef.current;
+      if (!link?.connected) {
+        onTalkSwitch(false);
+        return;
+      }
+      void link.poll(Date.now() / 1000).then(() => {
+        if (voiceSourceRef.current === "helmet") sendHelmetAudio(link.takeAudio());
+        else link.takeAudio();
+        onTalkSwitch(link.talk);
+      });
+    }, 100);
+    return () => clearInterval(timer);
+  }, [helmetPhase]);
 
   useEffect(() => {
     if (page !== "debug") return undefined;
@@ -495,28 +517,45 @@ function HelmetScreen() {
   }
 
   async function toggleVoice(): Promise<void> {
-    if (listeningRef.current) {
-      listeningRef.current = false;
-      setListening(false);
-      try {
-        streamRef.current.stop();
-      } catch {
-        // The microphone was already stopped.
-      }
-      agentRef.current?.finishUtterance();
-      setVoiceNote("Sending that to Grok...");
+    if (voiceSourceRef.current) {
+      await stopVoice();
       return;
     }
+    await startVoice("phone");
+  }
+
+  function onTalkSwitch(talk: boolean): void {
+    if (talk === talkRef.current) return;
+    talkRef.current = talk;
+    setHelmetTalk(talk);
+    if (talk && !voiceSourceRef.current) void startVoice("helmet");
+    if (!talk && voiceSourceRef.current === "helmet") void stopVoice();
+  }
+
+  function sendHelmetAudio(audio: Uint8Array): void {
+    if (audio.length > 0) helmetAudioRef.current.push(audio);
+    const agent = agentRef.current;
+    if (!agent || !listeningRef.current) return;
+    for (const chunk of helmetAudioRef.current.splice(0)) agent.sendPcm(chunk);
+  }
+
+  async function startVoice(source: "phone" | "helmet"): Promise<void> {
+    if (voiceSourceRef.current) return;
     const key = process.env.EXPO_PUBLIC_XAI_API_KEY ?? "";
     if (!voiceKeyConfigured(key)) {
       setVoiceNote("Add EXPO_PUBLIC_XAI_API_KEY in mobile/.env, then restart Expo.");
       return;
     }
-    const permission = await requestRecordingPermissionsAsync();
-    if (!permission.granted) {
-      setVoiceNote("Microphone permission is off.");
-      return;
+    if (source === "phone") {
+      const permission = await requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        setVoiceNote("Microphone permission is off.");
+        return;
+      }
     }
+    voiceSourceRef.current = source;
+    voiceReleasedRef.current = false;
+    helmetAudioRef.current = [];
     Keyboard.dismiss();
     setChoices([]);
     try {
@@ -528,14 +567,50 @@ function HelmetScreen() {
         });
       }
       listeningRef.current = true;
-      await streamRef.current.start();
+      if (source === "phone") await streamRef.current.start();
+      else sendHelmetAudio(new Uint8Array(0));
     } catch (error) {
       listeningRef.current = false;
+      voiceSourceRef.current = null;
+      helmetAudioRef.current = [];
       setVoiceNote(error instanceof Error ? error.message : "Voice failed");
       return;
     }
+    if (voiceReleasedRef.current) {
+      await stopVoice();
+      return;
+    }
     setListening(true);
-    setVoiceNote("Listening. Tap Done when you finish.");
+    setVoiceNote(source === "phone" ? "Listening. Tap Done when you finish." : "Listening on the helmet mic. Flip the switch off when you finish.");
+  }
+
+  async function stopVoice(): Promise<void> {
+    const source = voiceSourceRef.current;
+    if (!source) return;
+    if (!listeningRef.current) {
+      voiceReleasedRef.current = true;
+      return;
+    }
+    if (source === "helmet") {
+      const link = linkRef.current;
+      if (link?.connected) {
+        await link.poll(Date.now() / 1000);
+        sendHelmetAudio(link.takeAudio());
+      }
+    } else {
+      try {
+        streamRef.current.stop();
+      } catch {
+        // The microphone was already stopped.
+      }
+    }
+    listeningRef.current = false;
+    voiceSourceRef.current = null;
+    voiceReleasedRef.current = false;
+    helmetAudioRef.current = [];
+    setListening(false);
+    agentRef.current?.finishUtterance();
+    setVoiceNote("Sending that to Grok...");
   }
 
   function openSettings(): void {
@@ -642,6 +717,7 @@ function HelmetScreen() {
             connected={screen.bleConnected}
             sensors={sensors}
             holding={debugHold}
+            talk={helmetTalk}
             onBack={closeDebug}
             onConnect={() => void connectHelmet()}
             onLeft={() => holdDebug("left")}

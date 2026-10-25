@@ -1,7 +1,8 @@
 """BLE packet types shared by the phone and the ESP32-S3 peripheral.
 
-The phone writes an 8-byte cue. The ESP32 notifies a 4-byte helmet state
-and a 20-byte sensor sample. Both directions are little-endian.
+The phone writes an 8-byte cue. The ESP32 notifies a 4-byte helmet state,
+a 20-byte sensor sample, and, while the talk switch is closed, mu-law
+audio packets. Both directions are little-endian.
 shared/protocol/test_codec.py is the contract the firmware codec must match.
 """
 
@@ -12,6 +13,9 @@ PROTOCOL_VERSION = 1
 CUE_PACKET_LEN = 8
 HELMET_STATE_PACKET_LEN = 4
 SENSOR_PACKET_LEN = 20
+AUDIO_HEADER_LEN = 2
+AUDIO_MAX_SAMPLES = 240
+AUDIO_SAMPLE_RATE = 16000
 
 DIRECTION_NONE = 0
 DIRECTION_LEFT = 1
@@ -25,6 +29,7 @@ FLAG_REROUTING = 1 << 2
 
 BUTTON_MODE = 1 << 0
 BUTTON_SOS = 1 << 1
+BUTTON_TALK = 1 << 2
 
 FLAG_IMU_OK = 1 << 0
 FLAG_MIC_OK = 1 << 1
@@ -36,9 +41,12 @@ SERVICE_UUID = "7c1a0001-5e2b-4a6d-8f10-9b3c4d5e6f70"
 CUE_CHARACTERISTIC_UUID = "7c1a0002-5e2b-4a6d-8f10-9b3c4d5e6f70"
 HELMET_STATE_CHARACTERISTIC_UUID = "7c1a0003-5e2b-4a6d-8f10-9b3c4d5e6f70"
 SENSOR_CHARACTERISTIC_UUID = "7c1a0004-5e2b-4a6d-8f10-9b3c4d5e6f70"
+AUDIO_CHARACTERISTIC_UUID = "7c1a0005-5e2b-4a6d-8f10-9b3c4d5e6f70"
 
 _CUE_FLAG_MASK = FLAG_ARRIVED | FLAG_OFF_ROUTE | FLAG_REROUTING
-_BUTTON_MASK = BUTTON_MODE | BUTTON_SOS
+_BUTTON_MASK = BUTTON_MODE | BUTTON_SOS | BUTTON_TALK
+_ULAW_BIAS = 0x84
+_ULAW_CLIP = 32635
 _SENSOR_FLAG_MASK = FLAG_IMU_OK | FLAG_MIC_OK
 
 
@@ -237,3 +245,49 @@ def decode_sensor_sample(packet):
         gz_dps10=_unpack_i16(data[12], data[13]),
         mic_peak=_unpack_i16(data[14], data[15]),
     )
+
+
+@dataclass(frozen=True)
+class AudioPacket:
+    sequence: int
+    samples: tuple
+
+
+def ulaw_encode(sample):
+    """G.711 mu-law: one int16 sample to one byte."""
+    if isinstance(sample, bool) or not isinstance(sample, int) or sample < -32768 or sample > 32767:
+        raise ValueError("audio sample out of range")
+    sign = 0
+    if sample < 0:
+        sign = 0x80
+        sample = -sample
+    sample = min(sample, _ULAW_CLIP) + _ULAW_BIAS
+    exponent = 7
+    mask = 0x4000
+    while exponent > 0 and not sample & mask:
+        exponent -= 1
+        mask >>= 1
+    mantissa = (sample >> (exponent + 3)) & 0x0F
+    return ~(sign | (exponent << 4) | mantissa) & 0xFF
+
+
+def ulaw_decode(byte):
+    value = ~byte & 0xFF
+    magnitude = ((((value & 0x0F) << 3) + _ULAW_BIAS) << ((value >> 4) & 0x07)) - _ULAW_BIAS
+    return -magnitude if value & 0x80 else magnitude
+
+
+def encode_audio_packet(sequence, samples):
+    _uint("sequence", sequence, 255)
+    if not 1 <= len(samples) <= AUDIO_MAX_SAMPLES:
+        raise ValueError("audio packet holds 1 to %d samples" % AUDIO_MAX_SAMPLES)
+    return bytes([PROTOCOL_VERSION, sequence]) + bytes(ulaw_encode(sample) for sample in samples)
+
+
+def decode_audio_packet(packet):
+    if isinstance(packet, str) or not AUDIO_HEADER_LEN < len(packet) <= AUDIO_HEADER_LEN + AUDIO_MAX_SAMPLES:
+        raise ValueError("audio packet must hold 1 to %d samples" % AUDIO_MAX_SAMPLES)
+    data = bytes(packet)
+    if data[0] != PROTOCOL_VERSION:
+        raise ValueError("unsupported audio version")
+    return AudioPacket(data[1], tuple(ulaw_decode(byte) for byte in data[AUDIO_HEADER_LEN:]))

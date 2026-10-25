@@ -8,6 +8,8 @@
 
 #define PIN_BUTTON_MODE 8
 #define PIN_BUTTON_SOS 9
+/* Talk switch to GND: closed streams the helmet mic to the phone for voice. */
+#define PIN_TALK_SWITCH 7
 
 #define PIN_LED_LEFT 10
 #define PIN_LED_RIGHT 11

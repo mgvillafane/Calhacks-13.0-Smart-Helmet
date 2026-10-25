@@ -14,6 +14,7 @@ export function DebugScreen({
   connected,
   sensors,
   holding,
+  talk,
   onBack,
   onConnect,
   onLeft,
@@ -27,6 +28,7 @@ export function DebugScreen({
   connected: boolean;
   sensors: SensorSample | null;
   holding: DebugSide | null;
+  talk: boolean;
   onBack: () => void;
   onConnect: () => void;
   onLeft: () => void;
@@ -95,6 +97,9 @@ export function DebugScreen({
       ) : (
         <Text style={styles.body}>{connected ? "Helmet microphone is not reporting." : "Connect the helmet to see the microphone level."}</Text>
       )}
+      {connected ? (
+        <Text style={styles.body}>{talk ? "Talk switch on: streaming to voice" : "Talk switch off (GPIO 7)"}</Text>
+      ) : null}
     </ScrollView>
   );
 }

@@ -2,6 +2,7 @@
 #include "blinker.h"
 #include "brake.h"
 #include "heading.h"
+#include "mic.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -265,6 +266,25 @@ static void test_unusable_imu_publishes_the_invalid_sentinel(void) {
     expect(memcmp(packet, north_packet, HELMET_STATE_PACKET_LEN) == 0, "north notify bytes");
 }
 
+static void test_mic_removes_dc_and_scales_speech(void) {
+    MicFilter filter = {0};
+    MicFilter loud = {0};
+    int16_t out = 0;
+
+    expect(mic_pcm16(&filter, 0x10000000) == 0, "first slot sets the DC baseline");
+    for (int index = 0; index < 4000; index += 1) {
+        out = mic_pcm16(&filter, 0x10000000);
+    }
+    expect(out == 0, "a steady offset settles to silence");
+    out = mic_pcm16(&filter, 0x10000000 + (1000 << 8 << MIC_SHIFT));
+    expect(out >= 999 && out <= 1000, "a step passes at the documented gain");
+
+    mic_pcm16(&loud, 0);
+    expect(mic_pcm16(&loud, 0x7FFFFF00) == 32767, "positive overload clips");
+    expect(mic_pcm16(&loud, (int32_t)0x80000000) == -32768, "negative overload clips");
+    expect(mic_pcm16(NULL, 0x10000000) == 0, "missing filter is silent");
+}
+
 int main(void) {
     test_left_and_right_copy_onto_one_strip();
     test_front_buzzes_without_lighting_a_strip();
@@ -276,6 +296,7 @@ int main(void) {
     test_level_heading_cardinals();
     test_tilt_keeps_north();
     test_unusable_imu_publishes_the_invalid_sentinel();
+    test_mic_removes_dc_and_scales_speech();
     if (failures != 0) {
         fprintf(stderr, "%d helmet actuator check(s) failed\n", failures);
         return 1;

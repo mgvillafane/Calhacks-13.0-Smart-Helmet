@@ -8,7 +8,23 @@ import { CueEngine, fixAlong } from "./engine";
 import { debugStopCue, debugTurnCue, micLevel } from "./debug";
 import { advertisementFromScan, HelmetLink } from "./link";
 import { helmetScanPermissions } from "./scanPermissions";
-import { DIRECTION_FRONT, DIRECTION_LEFT, DIRECTION_RIGHT, encodeCue, encodeSensorSample, SENSOR_CHARACTERISTIC_UUID, SERVICE_UUID } from "./protocol";
+import {
+  AUDIO_CHARACTERISTIC_UUID,
+  AUDIO_MAX_SAMPLES,
+  BUTTON_TALK,
+  DIRECTION_FRONT,
+  DIRECTION_LEFT,
+  DIRECTION_RIGHT,
+  HELMET_STATE_CHARACTERISTIC_UUID,
+  decodeAudioPacket,
+  encodeAudioPacket,
+  encodeCue,
+  encodeSensorSample,
+  SENSOR_CHARACTERISTIC_UUID,
+  SERVICE_UUID,
+  ulawDecode,
+  ulawEncode,
+} from "./protocol";
 import { NavSession } from "./screen";
 import { RideEvent, RideFinish, RideRecorder, RideStart } from "./telemetry";
 import { VoiceAgent } from "./voiceAgent";
@@ -189,6 +205,49 @@ describe("phone navigator", () => {
     await link.poll(0);
     assert.equal(link.sensors?.axMg, 1000);
     assert.equal(link.sensors?.micPeak, 12000);
+  });
+
+  it("decodes helmet mic audio and the talk switch", async () => {
+    assert.deepEqual([0, 1000, -1000, 32767, -32768].map(ulawEncode), [0xff, 0xce, 0x4e, 0x80, 0x00]);
+    assert.deepEqual([0xff, 0xce, 0x4e, 0x80, 0x00].map(ulawDecode), [0, 988, -988, 32124, -32124]);
+    assert.deepEqual([...encodeAudioPacket(5, [0, 1000, -1000])], [0x01, 0x05, 0xff, 0xce, 0x4e]);
+    const decoded = decodeAudioPacket(Uint8Array.from([0x01, 0x05, 0xff, 0xce, 0x4e]));
+    assert.equal(decoded.sequence, 5);
+    assert.deepEqual([...new Int16Array(decoded.pcm.buffer)], [0, 988, -988]);
+    assert.throws(() => decodeAudioPacket(Uint8Array.from([0x01, 0x00])));
+    assert.throws(() => decodeAudioPacket(Uint8Array.from([0x02, 0x00, 0xff])));
+    assert.equal(encodeAudioPacket(255, new Array(AUDIO_MAX_SAMPLES).fill(0)).length, 242);
+
+    let audio = [encodeAudioPacket(254, [1000, 1000]), encodeAudioPacket(255, [1000, 1000]), encodeAudioPacket(1, [-1000, -1000])];
+    let state = [Uint8Array.from([0x00, 0x00, 0x01, BUTTON_TALK])];
+    const link = new HelmetLink({
+      async scan() {
+        return [];
+      },
+      async connect() {},
+      async disconnect() {},
+      async subscribe() {},
+      async writeWithoutResponse() {},
+      async takeNotifications(uuid) {
+        if (uuid === AUDIO_CHARACTERISTIC_UUID) {
+          const ready = audio;
+          audio = [];
+          return ready;
+        }
+        if (uuid === HELMET_STATE_CHARACTERISTIC_UUID) {
+          const ready = state;
+          state = [];
+          return ready;
+        }
+        return [];
+      },
+    });
+    await link.connect({ name: "SmartHelmet", address: "bb" });
+    await link.poll(0);
+    assert.equal(link.talk, true);
+    const pcm = new Int16Array(link.takeAudio().buffer);
+    assert.deepEqual([...pcm], [988, 988, 988, 988, 0, 0, -988, -988]);
+    assert.equal(link.takeAudio().length, 0);
   });
 
   it("shows a live GPS fix and explains a missing one", () => {

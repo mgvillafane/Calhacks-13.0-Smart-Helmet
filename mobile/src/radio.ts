@@ -18,6 +18,7 @@ type Device = {
     listener: (error: Error | null, characteristic: Characteristic | null) => void,
   ) => Subscription;
   cancelConnection: () => Promise<unknown>;
+  requestConnectionPriority: (priority: number) => Promise<unknown>;
 };
 
 type Manager = {
@@ -27,12 +28,15 @@ type Manager = {
     listener: (error: Error | null, device: Device | null) => void,
   ) => void;
   stopDeviceScan: () => void;
-  connectToDevice: (id: string) => Promise<Device>;
+  connectToDevice: (id: string, options?: { requestMTU?: number }) => Promise<Device>;
   destroy: () => void;
 };
 
 const SCAN_MS = 8000;
 const SCAN_LOW_LATENCY = 2;
+// One 242-byte audio packet per notify needs a 247-byte MTU.
+const HELMET_MTU = 247;
+const CONNECTION_PRIORITY_HIGH = 1;
 
 export async function createPhoneRadio(): Promise<Radio> {
   await requestBluetoothPermissions();
@@ -75,8 +79,13 @@ export async function createPhoneRadio(): Promise<Radio> {
         }
       }),
     async connect(address: string) {
-      device = await manager.connectToDevice(address);
+      device = await manager.connectToDevice(address, { requestMTU: HELMET_MTU });
       device = await device.discoverAllServicesAndCharacteristics();
+      try {
+        await device.requestConnectionPriority(CONNECTION_PRIORITY_HIGH);
+      } catch {
+        // Audio still streams at the default interval, with more gaps.
+      }
     },
     async disconnect() {
       for (const subscription of subscriptions.values()) subscription.remove();

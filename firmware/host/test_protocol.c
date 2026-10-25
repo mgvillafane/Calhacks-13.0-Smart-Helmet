@@ -66,6 +66,8 @@ static void test_helmet_state_golden_packets(void) {
     const uint8_t heading_expected[] = {0x84, 0x03, 0x01, 0x00};
     const uint8_t invalid_expected[] = {0xFF, 0xFF, 0x00, 0x03};
     const uint8_t north_expected[] = {0x00, 0x00, 0x01, 0x01};
+    HelmetState talk = {0, true, BUTTON_TALK};
+    const uint8_t talk_expected[] = {0x00, 0x00, 0x01, 0x04};
     HelmetState decoded;
 
     expect(encode_helmet_state(&heading, packet) == 0, "encode 900 decidegrees");
@@ -77,12 +79,16 @@ static void test_helmet_state_golden_packets(void) {
     expect_bytes(packet, invalid_expected, HELMET_STATE_PACKET_LEN, "invalid bytes");
     expect(encode_helmet_state(&north, packet) == 0, "encode north");
     expect_bytes(packet, north_expected, HELMET_STATE_PACKET_LEN, "north bytes");
+    expect(encode_helmet_state(&talk, packet) == 0, "encode talk switch");
+    expect_bytes(packet, talk_expected, HELMET_STATE_PACKET_LEN, "talk bytes");
+    expect(decode_helmet_state(talk_expected, HELMET_STATE_PACKET_LEN, &decoded) == 0, "decode talk");
+    expect(decoded.buttons == BUTTON_TALK, "talk bit");
 }
 
 static void test_helmet_state_rejects(void) {
     HelmetState too_far = {3600, true, 0};
     HelmetState mismatched = {900, false, 0};
-    HelmetState bad_button = {0, true, 0x04};
+    HelmetState bad_button = {0, true, 0x08};
     uint8_t sentinel_marked_valid[] = {0xFF, 0xFF, 0x01, 0x00};
     uint8_t packet[HELMET_STATE_PACKET_LEN];
     HelmetState decoded;
@@ -118,6 +124,22 @@ static void test_sensor_sample_golden_packet(void) {
     expect(decode_sensor_sample(packet, 19, &decoded) == -1, "reject short sensor");
 }
 
+static void test_audio_golden_packet(void) {
+    const int16_t samples[] = {0, 1000, -1000};
+    const uint8_t expected[] = {0x01, 0x05, 0xFF, 0xCE, 0x4E};
+    int16_t loud[AUDIO_MAX_SAMPLES + 1] = {0};
+    uint8_t packet[AUDIO_PACKET_MAX_LEN];
+
+    expect(ulaw_encode(32767) == 0x80 && ulaw_encode(-32768) == 0x00, "ulaw clips");
+    expect(ulaw_decode(0xFF) == 0 && ulaw_decode(0xCE) == 988 && ulaw_decode(0x4E) == -988, "ulaw decode");
+    expect(ulaw_decode(0x80) == 32124 && ulaw_decode(0x00) == -32124, "ulaw decode ends");
+    expect(encode_audio_packet(5, samples, 3, packet) == 5, "audio length");
+    expect_bytes(packet, expected, sizeof(expected), "audio bytes");
+    expect(encode_audio_packet(255, loud, AUDIO_MAX_SAMPLES, packet) == 242, "full audio packet");
+    expect(encode_audio_packet(0, loud, AUDIO_MAX_SAMPLES + 1, packet) == -1, "reject 241 samples");
+    expect(encode_audio_packet(0, loud, 0, packet) == -1, "reject empty audio");
+}
+
 int main(void) {
     test_left_cue_little_endian();
     test_front_and_uturn_golden_packets();
@@ -125,6 +147,7 @@ int main(void) {
     test_helmet_state_golden_packets();
     test_helmet_state_rejects();
     test_sensor_sample_golden_packet();
+    test_audio_golden_packet();
     if (failures != 0) {
         fprintf(stderr, "%d firmware protocol check(s) failed\n", failures);
         return 1;

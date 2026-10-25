@@ -1,4 +1,7 @@
 import {
+  AUDIO_CHARACTERISTIC_UUID,
+  AudioPacket,
+  BUTTON_TALK,
   CUE_CHARACTERISTIC_UUID,
   Cue,
   DEVICE_NAME,
@@ -7,6 +10,7 @@ import {
   HELMET_STATE_CHARACTERISTIC_UUID,
   SENSOR_CHARACTERISTIC_UUID,
   SensorSample,
+  decodeAudioPacket,
   decodeHelmetState,
   decodeSensorSample,
   encodeCue,
@@ -15,6 +19,7 @@ import {
 
 export const RESEND_S = 1;
 export const HEADING_FRESH_S = 1;
+export const MAX_AUDIO_GAP_PACKETS = 25;
 
 export type Advertisement = { name: string; address: string };
 
@@ -48,8 +53,25 @@ export class HelmetLink {
   private headingAtS: number | null = null;
   private lastPayload: Uint8Array | null = null;
   private lastSentS: number | null = null;
+  private audio: Uint8Array[] = [];
+  private audioSequence: number | null = null;
 
   constructor(private radio: Radio) {}
+
+  get talk(): boolean {
+    return (this.buttons & BUTTON_TALK) !== 0;
+  }
+
+  takeAudio(): Uint8Array {
+    const parts = this.audio.splice(0);
+    const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+    let offset = 0;
+    for (const part of parts) {
+      out.set(part, offset);
+      offset += part.length;
+    }
+    return out;
+  }
 
   async scan(): Promise<Advertisement | null> {
     for (const advertisement of await this.radio.scan()) {
@@ -67,6 +89,11 @@ export class HelmetLink {
     } catch {
       this.sensors = null;
     }
+    try {
+      await this.radio.subscribe(AUDIO_CHARACTERISTIC_UUID);
+    } catch {
+      this.audio = [];
+    }
     this.connected = true;
   }
 
@@ -80,6 +107,8 @@ export class HelmetLink {
     this.sensors = null;
     this.lastPayload = null;
     this.lastSentS = null;
+    this.audio = [];
+    this.audioSequence = null;
   }
 
   async send(cue: Cue, nowS: number): Promise<void> {
@@ -118,7 +147,23 @@ export class HelmetLink {
         continue;
       }
     }
+    for (const packet of await this.radio.takeNotifications(AUDIO_CHARACTERISTIC_UUID)) {
+      try {
+        this.acceptAudio(decodeAudioPacket(packet));
+      } catch {
+        continue;
+      }
+    }
     this.expireHeading(nowS);
+  }
+
+  private acceptAudio(packet: AudioPacket): void {
+    if (this.audioSequence !== null) {
+      const missing = (packet.sequence - this.audioSequence - 1) & 0xff;
+      if (missing > 0 && missing <= MAX_AUDIO_GAP_PACKETS) this.audio.push(new Uint8Array(missing * packet.pcm.length));
+    }
+    this.audioSequence = packet.sequence;
+    this.audio.push(packet.pcm);
   }
 
   private requireConnected(): void {

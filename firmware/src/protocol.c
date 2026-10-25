@@ -47,7 +47,7 @@ int encode_helmet_state(const HelmetState *state, uint8_t out[HELMET_STATE_PACKE
     if (reject_null(state) || reject_null(out)) {
         return -1;
     }
-    if ((state->buttons & ~(BUTTON_MODE | BUTTON_SOS)) != 0) {
+    if ((state->buttons & ~(BUTTON_MODE | BUTTON_SOS | BUTTON_TALK)) != 0) {
         return -1;
     }
     if (state->heading_valid) {
@@ -69,7 +69,7 @@ int decode_helmet_state(const uint8_t *packet, size_t length, HelmetState *out) 
     if (reject_null(packet) || reject_null(out) || length != HELMET_STATE_PACKET_LEN) {
         return -1;
     }
-    if (packet[2] > 1u || (packet[3] & ~(BUTTON_MODE | BUTTON_SOS)) != 0) {
+    if (packet[2] > 1u || (packet[3] & ~(BUTTON_MODE | BUTTON_SOS | BUTTON_TALK)) != 0) {
         return -1;
     }
     heading = (uint16_t)(packet[0] | ((uint16_t)packet[1] << 8));
@@ -141,4 +141,45 @@ int decode_sensor_sample(const uint8_t *packet, size_t length, SensorSample *out
     out->gz_dps10 = get_i16(packet + 12);
     out->mic_peak = get_i16(packet + 14);
     return 0;
+}
+
+#define ULAW_BIAS 0x84
+#define ULAW_CLIP 32635
+
+uint8_t ulaw_encode(int16_t sample) {
+    int32_t magnitude = sample;
+    uint8_t sign = 0;
+    uint8_t exponent = 7;
+    int32_t mask = 0x4000;
+    if (magnitude < 0) {
+        sign = 0x80u;
+        magnitude = -magnitude;
+    }
+    if (magnitude > ULAW_CLIP) {
+        magnitude = ULAW_CLIP;
+    }
+    magnitude += ULAW_BIAS;
+    while (exponent > 0 && (magnitude & mask) == 0) {
+        exponent -= 1;
+        mask >>= 1;
+    }
+    return (uint8_t)~(sign | (exponent << 4) | ((magnitude >> (exponent + 3)) & 0x0F));
+}
+
+int16_t ulaw_decode(uint8_t value) {
+    uint8_t bits = (uint8_t)~value;
+    int32_t magnitude = ((((int32_t)(bits & 0x0Fu) << 3) + ULAW_BIAS) << ((bits >> 4) & 0x07u)) - ULAW_BIAS;
+    return (int16_t)((bits & 0x80u) != 0 ? -magnitude : magnitude);
+}
+
+int encode_audio_packet(uint8_t sequence, const int16_t *samples, size_t count, uint8_t *out) {
+    if (reject_null(samples) || reject_null(out) || count == 0 || count > AUDIO_MAX_SAMPLES) {
+        return -1;
+    }
+    out[0] = PROTOCOL_VERSION;
+    out[1] = sequence;
+    for (size_t index = 0; index < count; index += 1) {
+        out[AUDIO_HEADER_LEN + index] = ulaw_encode(samples[index]);
+    }
+    return (int)(AUDIO_HEADER_LEN + count);
 }

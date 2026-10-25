@@ -18,6 +18,10 @@ extern "C" {
 #define CUE_PACKET_LEN 8
 #define HELMET_STATE_PACKET_LEN 4
 #define SENSOR_PACKET_LEN 20
+#define AUDIO_HEADER_LEN 2
+#define AUDIO_MAX_SAMPLES 240
+#define AUDIO_PACKET_MAX_LEN (AUDIO_HEADER_LEN + AUDIO_MAX_SAMPLES)
+#define AUDIO_SAMPLE_RATE 16000
 
 #define DIRECTION_NONE 0
 #define DIRECTION_LEFT 1
@@ -31,6 +35,7 @@ extern "C" {
 
 #define BUTTON_MODE 0x01u
 #define BUTTON_SOS 0x02u
+#define BUTTON_TALK 0x04u
 
 #define FLAG_IMU_OK 0x01u
 #define FLAG_MIC_OK 0x02u
@@ -42,6 +47,7 @@ extern "C" {
 #define CUE_CHARACTERISTIC_UUID "7c1a0002-5e2b-4a6d-8f10-9b3c4d5e6f70"
 #define HELMET_STATE_CHARACTERISTIC_UUID "7c1a0003-5e2b-4a6d-8f10-9b3c4d5e6f70"
 #define SENSOR_CHARACTERISTIC_UUID "7c1a0004-5e2b-4a6d-8f10-9b3c4d5e6f70"
+#define AUDIO_CHARACTERISTIC_UUID "7c1a0005-5e2b-4a6d-8f10-9b3c4d5e6f70"
 
 #define CUE_STALE_MS 2000u
 
@@ -77,6 +83,13 @@ int encode_helmet_state(const HelmetState *state, uint8_t out[HELMET_STATE_PACKE
 int decode_helmet_state(const uint8_t *packet, size_t length, HelmetState *out);
 int encode_sensor_sample(const SensorSample *sample, uint8_t out[SENSOR_PACKET_LEN]);
 int decode_sensor_sample(const uint8_t *packet, size_t length, SensorSample *out);
+
+/* G.711 mu-law. Audio packets are version, sequence, then 1..240 mu-law bytes.
+ * encode_audio_packet returns the packet length, or -1 on reject.
+ */
+uint8_t ulaw_encode(int16_t sample);
+int16_t ulaw_decode(uint8_t value);
+int encode_audio_packet(uint8_t sequence, const int16_t *samples, size_t count, uint8_t *out);
 
 #ifdef __cplusplus
 }

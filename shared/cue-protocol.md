@@ -10,6 +10,8 @@ Helmet-state characteristic (ESP32 notifies and allows read): `7c1a0003-5e2b-4a6
 
 Sensor characteristic (ESP32 notifies): `7c1a0004-5e2b-4a6d-8f10-9b3c4d5e6f70`
 
+Audio characteristic (ESP32 notifies): `7c1a0005-5e2b-4a6d-8f10-9b3c4d5e6f70`
+
 Multi-byte numbers are little-endian. Version is `1`.
 
 ## Cue, 8 bytes
@@ -33,7 +35,7 @@ Left, front, and right each pulse one motor: GPIO 17, 18, and 21. A u-turn alter
 | --- | --- | --- |
 | 0–1 | heading | uint16 decidegrees, 0–3599, or `0xFFFF` when invalid |
 | 2 | valid | 1 when heading is 0–3599, otherwise 0 |
-| 3 | buttons | bit 0 MODE (GPIO 8), bit 1 SOS (GPIO 9), active low |
+| 3 | buttons | bit 0 MODE (GPIO 8), bit 1 SOS (GPIO 9), bit 2 TALK switch (GPIO 7), active low |
 
 A valid flag must match the heading. The ESP32 notifies this about 5 times a second. Until the IMU is read, heading is the invalid sentinel.
 
@@ -53,3 +55,13 @@ A valid flag must match the heading. The ESP32 notifies this about 5 times a sec
 | 16–19 | reserved | 0 |
 
 Unknown versions or flag bits are rejected. The ESP32 notifies this about 10 times a second. Full 16 kHz audio does not fit on this notify. The debug page shows the six IMU numbers and a level bar from the peak.
+
+## Audio, 3–242 bytes
+
+| Offset | Field | Values |
+| --- | --- | --- |
+| 0 | version | 1 |
+| 1 | sequence | uint8, +1 per packet, wraps at 255 |
+| 2… | samples | 1–240 G.711 mu-law bytes, 16 kHz mono |
+
+The ESP32 streams the INMP441 here only while the TALK switch is closed and a phone is connected: 16 KB/s, about 67 packets a second. The phone asks for a 247-byte MTU so a full packet fits one notify. A sequence gap is filled with silence so the audio keeps its timing. Closing TALK starts a Grok Voice turn on the phone; opening it sends the turn. Unknown versions or empty packets are rejected.

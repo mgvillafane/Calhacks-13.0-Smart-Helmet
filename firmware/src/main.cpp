@@ -12,6 +12,7 @@
 #include "blinker.h"
 #include "brake.h"
 #include "heading.h"
+#include "mic.h"
 #include "pins.h"
 #include "protocol.h"
 #include "telemetry.h"
@@ -25,6 +26,8 @@ static const int kMotorPwmChannelRight = 2;
 static const int kNotifyPeriodMs = 200;
 static const int kSensorPeriodMs = 100;
 static const int kImuPeriodMs = 20;
+static const uint32_t kTalkDebounceMs = 30;
+static const uint16_t kBleMtu = 247;
 static const uint8_t kMpuPwrMgmt1 = 0x6B;
 static const uint8_t kMpuAccelOut = 0x3B;
 static uint8_t mpuAddress = 0x68;
@@ -67,19 +70,6 @@ static bool startMicrophone(void) {
     return microphone.begin(I2S_MODE_STD, 16000, I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO);
 }
 
-// INMP441 with L/R grounded fills the left half of each stereo frame.
-static bool readMicrophone(int32_t *sample) {
-    int32_t frames[128];
-    size_t bytes = 0;
-    esp_err_t err = i2s_channel_read(microphone.rxChan(), frames, sizeof(frames), &bytes, 0);
-    size_t count = bytes / sizeof(int32_t);
-    if (count < 2 || (err != ESP_OK && err != ESP_ERR_TIMEOUT)) {
-        return false;
-    }
-    *sample = frames[count - 2] >> 8;
-    return true;
-}
-
 static bool startMpu(void) {
     Wire.begin(PIN_IMU_SDA, PIN_IMU_SCL);
     Wire.setClock(400000);
@@ -94,8 +84,10 @@ static bool startMpu(void) {
 
 static BLECharacteristic *helmetStateCharacteristic = nullptr;
 static BLECharacteristic *sensorCharacteristic = nullptr;
+static BLECharacteristic *audioCharacteristic = nullptr;
 static SensorSample latestSensors = {};
-static int32_t micPeak = 0;
+static volatile int32_t micPeak = 0;
+static volatile bool talkClosed = false;
 static Cue activeCue = {DIRECTION_NONE, 0, 0, 0, 0};
 static uint32_t cueReceivedMs = 0;
 static bool cueFresh = false;
@@ -111,6 +103,9 @@ static uint8_t readButtons(void) {
     }
     if (digitalRead(PIN_BUTTON_SOS) == LOW) {
         buttons |= BUTTON_SOS;
+    }
+    if (talkClosed) {
+        buttons |= BUTTON_TALK;
     }
     return buttons;
 }
@@ -222,17 +217,10 @@ static void rememberImu(float ax, float ay, float az, float gx, float gy, float 
     latestSensors.gz_dps10 = clampI16((int)lroundf(gz * 10.0f));
 }
 
-static void rememberMic(int32_t sample) {
-    int32_t peak = sample < 0 ? -sample : sample;
-    latestSensors.mic_ok = true;
-    if (peak > micPeak) {
-        micPeak = peak;
-    }
-}
-
 static void notifySensors(void) {
     uint8_t packet[SENSOR_PACKET_LEN];
-    latestSensors.mic_peak = clampI16((int)(micPeak >> 8));
+    latestSensors.mic_ok = micReady;
+    latestSensors.mic_peak = clampI16((int)micPeak);
     micPeak = 0;
     if (encode_sensor_sample(&latestSensors, packet) != 0 || sensorCharacteristic == nullptr) {
         return;
@@ -256,6 +244,63 @@ static void notifyHelmetState(void) {
     helmetStateCharacteristic->setValue(packet, HELMET_STATE_PACKET_LEN);
     if (clientConnected) {
         helmetStateCharacteristic->notify();
+    }
+}
+
+// Runs in its own task so a slow loop pass (Wi-Fi telemetry, NeoPixels) cannot
+// overflow the I2S DMA buffers mid-sentence. INMP441 with L/R grounded fills
+// the left (even) slot of each stereo frame.
+static void streamMicrophone(void *unused) {
+    static int32_t slots[512];
+    int16_t pending[AUDIO_MAX_SAMPLES];
+    uint8_t packet[AUDIO_PACKET_MAX_LEN];
+    size_t pendingCount = 0;
+    uint8_t sequence = 0;
+    MicFilter filter = {};
+    (void)unused;
+    for (;;) {
+        size_t bytes = 0;
+        i2s_channel_read(microphone.rxChan(), slots, sizeof(slots), &bytes, pdMS_TO_TICKS(100));
+        bool streaming = talkClosed && clientConnected && audioCharacteristic != nullptr;
+        size_t count = bytes / sizeof(int32_t);
+        for (size_t index = 0; index + 1 < count; index += 2) {
+            int16_t sample = mic_pcm16(&filter, slots[index]);
+            int32_t level = sample < 0 ? -(int32_t)sample : sample;
+            if (level > micPeak) {
+                micPeak = level;
+            }
+            if (!streaming) {
+                continue;
+            }
+            pending[pendingCount] = sample;
+            pendingCount += 1;
+            if (pendingCount == AUDIO_MAX_SAMPLES) {
+                int length = encode_audio_packet(sequence, pending, pendingCount, packet);
+                if (length > 0) {
+                    audioCharacteristic->setValue(packet, (size_t)length);
+                    audioCharacteristic->notify();
+                }
+                sequence += 1;
+                pendingCount = 0;
+            }
+        }
+        if (!streaming) {
+            pendingCount = 0;
+        }
+    }
+}
+
+static void updateTalkSwitch(uint32_t now) {
+    static bool reading = false;
+    static uint32_t changedMs = 0;
+    bool closed = digitalRead(PIN_TALK_SWITCH) == LOW;
+    if (closed != reading) {
+        reading = closed;
+        changedMs = now;
+    }
+    if (reading != talkClosed && now - changedMs >= kTalkDebounceMs) {
+        talkClosed = reading;
+        notifyHelmetState();
     }
 }
 
@@ -295,6 +340,7 @@ void setup(void) {
 
     pinMode(PIN_BUTTON_MODE, INPUT_PULLUP);
     pinMode(PIN_BUTTON_SOS, INPUT_PULLUP);
+    pinMode(PIN_TALK_SWITCH, INPUT_PULLUP);
     pinMode(PIN_MOTOR_FRONT, OUTPUT);
     digitalWrite(PIN_MOTOR_FRONT, LOW);
 
@@ -318,6 +364,7 @@ void setup(void) {
     Serial.println(micReady ? "INMP441 ready" : "INMP441 missing");
 
     BLEDevice::init(DEVICE_NAME);
+    BLEDevice::setMTU(kBleMtu);
     BLEServer *server = BLEDevice::createServer();
     server->setCallbacks(new ServerCallbacks());
 
@@ -340,12 +387,18 @@ void setup(void) {
     );
     sensorCharacteristic->addDescriptor(new BLE2902());
 
+    audioCharacteristic = service->createCharacteristic(AUDIO_CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+    audioCharacteristic->addDescriptor(new BLE2902());
+
     service->start();
     BLEAdvertising *advertising = BLEDevice::getAdvertising();
     advertising->addServiceUUID(SERVICE_UUID);
     advertising->setScanResponse(true);
     BLEDevice::startAdvertising();
     Serial.println("SmartHelmet advertising");
+    if (micReady) {
+        xTaskCreatePinnedToCore(streamMicrophone, "mic", 4096, nullptr, 2, nullptr, 1);
+    }
     telemetry_begin();
     pinMode(PIN_MOTOR_FRONT, OUTPUT);
     digitalWrite(PIN_MOTOR_FRONT, LOW);
@@ -367,7 +420,6 @@ void loop(void) {
     static uint32_t lastNotifyMs = 0;
     static uint32_t lastSensorMs = 0;
     static uint32_t lastImuMs = 0;
-    static uint32_t lastMicMs = 0;
     static BrakeState brakeState = {};
     static bool braking = false;
     static uint32_t brakeStartMs = 0;
@@ -375,14 +427,7 @@ void loop(void) {
     uint32_t now = millis();
     applyCue(now);
     countStaleStop(now);
-    if (micReady && now - lastMicMs >= kImuPeriodMs) {
-        int32_t sample = 0;
-        if (readMicrophone(&sample)) {
-            rememberMic(sample);
-            Serial.printf("mic,%lu,%ld\n", now, (long)sample);
-        }
-        lastMicMs = now;
-    }
+    updateTalkSwitch(now);
     if (mpuReady && now - lastImuMs >= kImuPeriodMs) {
         float ax;
         float ay;
