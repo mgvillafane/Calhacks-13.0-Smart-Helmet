@@ -99,12 +99,6 @@ static uint32_t brakeCount = 0;
 
 static uint8_t readButtons(void) {
     uint8_t buttons = 0;
-    if (digitalRead(PIN_BUTTON_MODE) == LOW) {
-        buttons |= BUTTON_MODE;
-    }
-    if (digitalRead(PIN_BUTTON_SOS) == LOW) {
-        buttons |= BUTTON_SOS;
-    }
     if (talkClosed) {
         buttons |= BUTTON_TALK;
     }
@@ -302,7 +296,7 @@ static void updateTalkSwitch(uint32_t now) {
     static bool reading = false;
     static bool stable = false;
     static uint32_t changedMs = 0;
-    bool closed = digitalRead(PIN_TALK_SWITCH) == LOW;
+    bool closed = digitalRead(PIN_BUTTON_SENSE) == LOW;
     if (closed != reading) {
         reading = closed;
         changedMs = now;
@@ -356,9 +350,9 @@ void setup(void) {
     Serial.setTxTimeoutMs(0);
     Serial1.begin(115200, SERIAL_8N1, PIN_BLINKER_RX, PIN_BLINKER_TX);
 
-    pinMode(PIN_BUTTON_MODE, INPUT_PULLUP);
-    pinMode(PIN_BUTTON_SOS, INPUT_PULLUP);
-    pinMode(PIN_TALK_SWITCH, INPUT_PULLUP);
+    pinMode(PIN_BUTTON_DRIVE, OUTPUT);
+    digitalWrite(PIN_BUTTON_DRIVE, LOW);
+    pinMode(PIN_BUTTON_SENSE, INPUT_PULLUP);
     pinMode(PIN_MOTOR_FRONT, OUTPUT);
     digitalWrite(PIN_MOTOR_FRONT, LOW);
 

@@ -6,10 +6,10 @@
 #define PIN_IMU_SCL 5
 #define PIN_IMU_INT1 6
 
-#define PIN_BUTTON_MODE 8
-#define PIN_BUTTON_SOS 9
-/* Talk switch to GND. Hold it while speaking; release ends the turn. */
-#define PIN_TALK_SWITCH 7
+/* One switch ties these pins together. Drive stays low; sense is a pull-up.
+   Open reads high. Closed reads low. That closed state is the talk button. */
+#define PIN_BUTTON_DRIVE 1
+#define PIN_BUTTON_SENSE 2
 
 #define PIN_LED_LEFT 10
 #define PIN_LED_RIGHT 11
