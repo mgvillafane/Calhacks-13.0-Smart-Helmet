@@ -3,8 +3,9 @@
 // ESP32 GPIO 12 TX -> Arduino RX (pin 0)
 // ESP32 GPIO 13 RX -> Arduino TX (pin 1)
 // Share ground. Letters at 115200: L left, R right, U u-turn, O turn off.
-// B holds the brake strip on and b releases it. A turn can stay lit while braking.
-// Any letter older than the timeout turns every strip off.
+// B holds the brake strip solid red and b releases it. A turn can stay lit while braking.
+// When not braking, the brake strip flashes red once every 2 seconds as a tail light.
+// Any letter older than the timeout turns the turn strips off and releases the brake.
 // At power-up the strips flash left, right, then brake once.
 // The on-board LED (pin 13) stays lit while letters keep arriving.
 // Every received byte is echoed on TX so a laptop on USB can watch the link.
@@ -16,6 +17,8 @@
 #define NUM_LEDS 5  // LEDs per strip
 #define BLINK_MS 400
 #define COMMAND_TIMEOUT_MS 600
+#define TAIL_PERIOD_MS 2000
+#define TAIL_FLASH_MS 250
 
 Adafruit_NeoPixel leftStrip(NUM_LEDS, LEFT_PIN, NEO_GRB + NEO_KHZ800);
 Adafruit_NeoPixel rightStrip(NUM_LEDS, RIGHT_PIN, NEO_GRB + NEO_KHZ800);
@@ -116,13 +119,15 @@ void loop() {
     on = blinkOn;
   }
 
+  bool brakeLit = brakeOn || millis() % TAIL_PERIOD_MS < TAIL_FLASH_MS;
+
   static char shown = 0;
   static bool shownOn = false;
   static bool shownBrake = false;
-  if (turn != shown || on != shownOn || brakeOn != shownBrake) {
-    showCommand(turn, on, brakeOn);
+  if (turn != shown || on != shownOn || brakeLit != shownBrake) {
+    showCommand(turn, on, brakeLit);
     shown = turn;
     shownOn = on;
-    shownBrake = brakeOn;
+    shownBrake = brakeLit;
   }
 }
