@@ -1,7 +1,7 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from "expo-audio";
 import { File, Paths } from "expo-file-system";
 import { VoiceAgent, VoiceSocket } from "./voiceAgent";
-import { VoiceCommand, VoiceNotice, VOICE_SAMPLE_RATE, pcmDurationMs, voiceConnectOptions, wavFromPcm16 } from "./voice";
+import { VoiceCommand, VoiceNotice, VOICE_SAMPLE_RATE, amplifyPcm16, pcmDurationMs, voiceConnectOptions, wavFromPcm16 } from "./voice";
 
 type SocketWithHeaders = new (
   url: string,
@@ -11,8 +11,12 @@ type SocketWithHeaders = new (
 
 let player: AudioPlayer | null = null;
 let previous: File | null = null;
-let monitor: AudioPlayer | null = null;
-let monitorFile: File | null = null;
+const MONITOR_GAIN = 4;
+const MONITOR_MIN_BYTES = 6400;
+const players: Array<AudioPlayer | null> = [null, null];
+const playerFiles: Array<File | null> = [null, null];
+let playerTurn = 0;
+let monitorPending: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
 let monitorChain: Promise<void> = Promise.resolve();
 
 export function connectGrokVoice(
@@ -73,8 +77,12 @@ export function connectGrokVoice(
 
 export function playHelmetMonitor(pcm: Uint8Array): void {
   if (pcm.length < 2) return;
-  const wav = wavFromPcm16(pcm.slice(), VOICE_SAMPLE_RATE);
-  monitorChain = monitorChain.then(() => playMonitorWav(wav)).catch(() => undefined);
+  monitorPending = concatPcm(monitorPending, amplifyPcm16(pcm, MONITOR_GAIN));
+  if (monitorPending.length < MONITOR_MIN_BYTES) return;
+  const chunk = monitorPending;
+  monitorPending = new Uint8Array(0);
+  const wav = wavFromPcm16(chunk, VOICE_SAMPLE_RATE);
+  monitorChain = monitorChain.then(() => startMonitorClip(wav)).catch(() => undefined);
 }
 
 export async function prepareVoiceAudio(): Promise<void> {
@@ -86,28 +94,53 @@ export async function prepareVoiceAudio(): Promise<void> {
   });
 }
 
-async function playMonitorWav(wav: Uint8Array): Promise<void> {
-  await prepareVoiceAudio();
-  const file = new File(Paths.cache, `helmet-mic-${Date.now()}.wav`);
+async function prepareSpeaker(): Promise<void> {
+  await setAudioModeAsync({
+    allowsRecording: false,
+    playsInSilentMode: true,
+    interruptionMode: "mixWithOthers",
+    shouldRouteThroughEarpiece: false,
+  });
+}
+
+async function startMonitorClip(wav: Uint8Array): Promise<void> {
+  await prepareSpeaker();
+  const index = playerTurn;
+  playerTurn = 1 - playerTurn;
+  const file = new File(Paths.cache, `helmet-mic-${index}-${Date.now()}.wav`);
   await file.write(wav);
-  if (!monitor) monitor = createAudioPlayer(file.uri);
-  else monitor.replace(file.uri);
+  let player = players[index];
+  if (!player) {
+    player = createAudioPlayer(file.uri, { updateInterval: 50, keepAudioSessionActive: true });
+    players[index] = player;
+  } else {
+    player.replace(file.uri);
+  }
+  player.muted = false;
+  player.volume = 1;
+  player.loop = false;
   try {
-    await monitor.seekTo(0);
+    await player.seekTo(0);
   } catch {
     // Playback starts at the beginning once the file loads.
   }
-  monitor.play();
-  const stale = monitorFile;
-  monitorFile = file;
+  player.play();
+  const stale = playerFiles[index];
+  playerFiles[index] = file;
   if (stale?.exists) {
     try {
       stale.delete();
     } catch {
-      // The next chunk replaces this clip.
+      // This player has moved on to the new clip.
     }
   }
-  await new Promise((resolve) => setTimeout(resolve, pcmDurationMs(Math.max(0, wav.length - 44))));
+}
+
+function concatPcm(left: Uint8Array, right: Uint8Array): Uint8Array {
+  const out = new Uint8Array(left.length + right.length);
+  out.set(left, 0);
+  out.set(right, left.length);
+  return out;
 }
 
 async function playWav(wav: Uint8Array): Promise<void> {

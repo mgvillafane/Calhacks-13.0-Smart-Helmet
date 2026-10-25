@@ -288,6 +288,8 @@ static void test_mic_removes_dc_and_scales_speech(void) {
     expect(talk_streaming(true, true, false) == true, "letting go keeps the helmet mic on");
     expect(talk_streaming(true, false, true) == false, "the next press stops the helmet mic");
     expect(talk_streaming(false, true, false) == false, "letting go stays off");
+    expect(mic_louder_slot(0, 5000) == 5000, "right slot is used when left is silent");
+    expect(mic_louder_slot(-8000, 100) == -8000, "left slot wins when it is louder");
 }
 
 int main(void) {

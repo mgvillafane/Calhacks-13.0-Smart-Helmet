@@ -261,10 +261,10 @@ static void streamMicrophone(void *unused) {
     for (;;) {
         size_t bytes = 0;
         i2s_channel_read(microphone.rxChan(), slots, sizeof(slots), &bytes, pdMS_TO_TICKS(100));
-        bool streaming = talkClosed && clientConnected && audioCharacteristic != nullptr;
+        bool streaming = clientConnected && audioCharacteristic != nullptr;
         size_t count = bytes / sizeof(int32_t);
         for (size_t index = 0; index + 1 < count; index += 2) {
-            int16_t sample = mic_pcm16(&filter, slots[index]);
+            int16_t sample = mic_pcm16(&filter, mic_louder_slot(slots[index], slots[index + 1]));
             int32_t level = sample < 0 ? -(int32_t)sample : sample;
             if (level > micPeak) {
                 micPeak = level;

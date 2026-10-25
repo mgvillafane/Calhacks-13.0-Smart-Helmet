@@ -9,6 +9,12 @@ bool talk_streaming(bool streaming, bool was_closed, bool closed) {
     return streaming;
 }
 
+int32_t mic_louder_slot(int32_t left, int32_t right) {
+    uint32_t left_abs = left < 0 ? (uint32_t)0 - (uint32_t)left : (uint32_t)left;
+    uint32_t right_abs = right < 0 ? (uint32_t)0 - (uint32_t)right : (uint32_t)right;
+    return right_abs > left_abs ? right : left;
+}
+
 int16_t mic_pcm16(MicFilter *filter, int32_t slot) {
     int32_t in = slot >> 8;
     int32_t out;

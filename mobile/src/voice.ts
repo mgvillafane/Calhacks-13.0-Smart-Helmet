@@ -172,6 +172,17 @@ export function wavFromPcm16(pcm: Uint8Array, sampleRate: number): Uint8Array {
   return wav;
 }
 
+export function amplifyPcm16(pcm: Uint8Array, gain: number): Uint8Array {
+  const out = new Uint8Array(pcm.length - (pcm.length % 2));
+  const src = new DataView(pcm.buffer, pcm.byteOffset, out.length);
+  const dst = new DataView(out.buffer);
+  for (let index = 0; index < out.length; index += 2) {
+    const scaled = Math.round(src.getInt16(index, true) * gain);
+    dst.setInt16(index, Math.max(-32768, Math.min(32767, scaled)), true);
+  }
+  return out;
+}
+
 export function pcmDurationMs(byteLength: number, sampleRate = VOICE_SAMPLE_RATE): number {
   if (byteLength <= 0 || sampleRate <= 0) return 0;
   return Math.ceil((byteLength / 2 / sampleRate) * 1000);

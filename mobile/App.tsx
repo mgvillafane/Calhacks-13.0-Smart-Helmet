@@ -74,7 +74,6 @@ function HelmetScreen() {
   const talkRef = useRef(false);
   const pageRef = useRef(page);
   pageRef.current = page;
-  const [helmetTalk, setHelmetTalk] = useState(false);
   const executeRef = useRef<(command: VoiceCommand) => Promise<string>>(async () => "{}");
   const [listening, setListening] = useState(false);
   const [voiceNote, setVoiceNote] = useState("");
@@ -522,7 +521,6 @@ function HelmetScreen() {
   function onTalkSwitch(talk: boolean): void {
     if (talk === talkRef.current) return;
     talkRef.current = talk;
-    setHelmetTalk(talk);
     if (talk && voiceSourceRef.current !== "helmet") void startVoice("helmet");
     if (!talk && voiceSourceRef.current === "helmet") void stopVoice();
   }
@@ -723,7 +721,6 @@ function HelmetScreen() {
             connected={screen.bleConnected}
             sensors={sensors}
             holding={debugHold}
-            talk={helmetTalk}
             listening={listening}
             onBack={closeDebug}
             onConnect={() => void connectHelmet()}

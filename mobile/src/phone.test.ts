@@ -30,6 +30,7 @@ import { RideEvent, RideFinish, RideRecorder, RideStart } from "./telemetry";
 import { VoiceAgent } from "./voiceAgent";
 import {
   VOICE_TOOL_NAMES,
+  amplifyPcm16,
   base64ToBytes,
   bytesToBase64,
   commandFromCall,
@@ -245,6 +246,9 @@ describe("phone navigator", () => {
     await link.connect({ name: "SmartHelmet", address: "bb" });
     await link.poll(0);
     assert.equal(link.talk, true);
+    const louder = amplifyPcm16(Uint8Array.of(0xe8, 0x03, 0x20, 0x4e), 4);
+    assert.equal(new DataView(louder.buffer).getInt16(0, true), 4000);
+    assert.equal(new DataView(louder.buffer).getInt16(2, true), 32767);
     const pcm = new Int16Array(link.takeAudio().buffer);
     assert.deepEqual([...pcm], [988, 988, 988, 988, 0, 0, -988, -988]);
     assert.equal(link.takeAudio().length, 0);
