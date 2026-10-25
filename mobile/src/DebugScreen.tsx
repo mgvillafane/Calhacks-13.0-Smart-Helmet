@@ -16,12 +16,14 @@ export function DebugScreen({
   holding,
   listening,
   buttonPressed,
+  monitorOn,
   onBack,
   onConnect,
   onLeft,
   onFront,
   onRight,
   onStop,
+  onToggleMonitor,
 }: {
   gps: GpsReading | null;
   gpsMessage: string;
@@ -31,12 +33,14 @@ export function DebugScreen({
   holding: DebugSide | null;
   listening: boolean;
   buttonPressed: boolean;
+  monitorOn: boolean;
   onBack: () => void;
   onConnect: () => void;
   onLeft: () => void;
   onFront: () => void;
   onRight: () => void;
   onStop: () => void;
+  onToggleMonitor: () => void;
 }) {
   const imu = sensors?.imuOk ? sensors : null;
   const mic = sensors?.micOk ? sensors.micPeak : null;
@@ -108,12 +112,15 @@ export function DebugScreen({
       ) : (
         <Text style={styles.body}>{connected ? "Helmet microphone is not reporting." : "Connect the helmet to see the microphone level."}</Text>
       )}
-      {connected ? (
-        <>
-          {listening ? <Text style={styles.body}>Listening</Text> : null}
-          <Text style={styles.body}>This phone is playing the helmet microphone.</Text>
-        </>
-      ) : null}
+      {listening ? <Text style={styles.body}>Listening</Text> : null}
+      <Pressable
+        style={[styles.pill, monitorOn ? styles.pillOn : null, styles.buttonState]}
+        onPress={onToggleMonitor}
+        accessibilityLabel={monitorOn ? "Stop microphone playback" : "Play microphone"}
+      >
+        <Text style={[styles.pillText, monitorOn ? styles.pillTextOn : null]}>{monitorOn ? "Stop playback" : "Play mic"}</Text>
+      </Pressable>
+      <Text style={styles.body}>{monitorOn ? "This phone is playing the helmet microphone." : "Playback is off."}</Text>
     </ScrollView>
   );
 }

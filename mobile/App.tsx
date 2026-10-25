@@ -21,7 +21,7 @@ import { StreetMap } from "./src/StreetMap";
 import { Cue, SensorSample } from "./src/protocol";
 import { VoiceCommand, VOICE_SAMPLE_RATE, prepareMicPcm, voiceKeyConfigured, whatsNextResult } from "./src/voice";
 import { VoiceAgent } from "./src/voiceAgent";
-import { connectGrokVoice, playHelmetMonitor, prepareVoiceAudio } from "./src/voiceLive";
+import { connectGrokVoice, playHelmetMonitor, prepareVoiceAudio, stopHelmetMonitor } from "./src/voiceLive";
 import { convexSink } from "./src/convexSink";
 import { RideRecorder, newSessionKey } from "./src/telemetry";
 
@@ -77,6 +77,9 @@ function HelmetScreen() {
   const executeRef = useRef<(command: VoiceCommand) => Promise<string>>(async () => "{}");
   const [listening, setListening] = useState(false);
   const [buttonPressed, setButtonPressed] = useState(false);
+  const [monitorOn, setMonitorOn] = useState(false);
+  const monitorRef = useRef(false);
+  monitorRef.current = monitorOn;
   const [voiceNote, setVoiceNote] = useState("");
   const [helmetPhase, setHelmetPhase] = useState<"off" | "searching" | "on">("off");
   const [linkNote, setLinkNote] = useState("");
@@ -215,7 +218,7 @@ function HelmetScreen() {
       }
       void link.poll(Date.now() / 1000).then(() => {
         const audio = link.takeAudio();
-        if (pageRef.current === "debug") playHelmetMonitor(audio);
+        if (pageRef.current === "debug" && monitorRef.current) playHelmetMonitor(audio);
         if (voiceSourceRef.current === "helmet") sendHelmetAudio(audio);
         setButtonPressed(link.buttonPressed);
         onTalkSwitch(link.buttonPressed);
@@ -240,6 +243,11 @@ function HelmetScreen() {
     }, 100);
     return () => clearInterval(timer);
   }, [page]);
+
+  useEffect(() => {
+    if (page === "debug" && monitorOn) return;
+    stopHelmetMonitor();
+  }, [page, monitorOn]);
 
   async function loadPlaces(query: string, alreadyCancelled: boolean, isCancelled: () => boolean): Promise<void> {
     if (alreadyCancelled) return;
@@ -730,12 +738,14 @@ function HelmetScreen() {
             holding={debugHold}
             listening={listening}
             buttonPressed={buttonPressed}
+            monitorOn={monitorOn}
             onBack={closeDebug}
             onConnect={() => void connectHelmet()}
             onLeft={() => holdDebug("left")}
             onFront={() => holdDebug("front")}
             onRight={() => holdDebug("right")}
             onStop={stopDebugCue}
+            onToggleMonitor={() => setMonitorOn((on) => !on)}
           />
         ) : page === "settings" ? (
           <ScrollView contentContainerStyle={styles.settings} keyboardShouldPersistTaps="handled">

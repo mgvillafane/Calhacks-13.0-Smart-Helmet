@@ -16,6 +16,7 @@ const MONITOR_MIN_BYTES = 6400;
 const players: Array<AudioPlayer | null> = [null, null];
 const playerFiles: Array<File | null> = [null, null];
 let playerTurn = 0;
+let monitorGeneration = 0;
 let monitorPending: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
 let monitorChain: Promise<void> = Promise.resolve();
 
@@ -82,7 +83,20 @@ export function playHelmetMonitor(pcm: Uint8Array): void {
   const chunk = monitorPending;
   monitorPending = new Uint8Array(0);
   const wav = wavFromPcm16(chunk, VOICE_SAMPLE_RATE);
-  monitorChain = monitorChain.then(() => startMonitorClip(wav)).catch(() => undefined);
+  const generation = monitorGeneration;
+  monitorChain = monitorChain.then(() => startMonitorClip(wav, generation)).catch(() => undefined);
+}
+
+export function stopHelmetMonitor(): void {
+  monitorGeneration += 1;
+  monitorPending = new Uint8Array(0);
+  for (const playing of players) {
+    try {
+      playing?.pause();
+    } catch {
+      // The clip already finished.
+    }
+  }
 }
 
 export async function prepareVoiceAudio(): Promise<void> {
@@ -103,8 +117,10 @@ async function prepareSpeaker(): Promise<void> {
   });
 }
 
-async function startMonitorClip(wav: Uint8Array): Promise<void> {
+async function startMonitorClip(wav: Uint8Array, generation: number): Promise<void> {
+  if (generation !== monitorGeneration) return;
   await prepareSpeaker();
+  if (generation !== monitorGeneration) return;
   const index = playerTurn;
   playerTurn = 1 - playerTurn;
   const file = new File(Paths.cache, `helmet-mic-${index}-${Date.now()}.wav`);
@@ -124,6 +140,7 @@ async function startMonitorClip(wav: Uint8Array): Promise<void> {
   } catch {
     // Playback starts at the beginning once the file loads.
   }
+  if (generation !== monitorGeneration) return;
   player.play();
   const stale = playerFiles[index];
   playerFiles[index] = file;
